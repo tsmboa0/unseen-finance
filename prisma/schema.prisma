@@ -1,0 +1,171 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+// ─── Merchant ────────────────────────────────────────────────────────────────
+// A registered business that accepts Unseen Pay payments.
+// Created when a user signs up on the dashboard via Privy.
+
+model Merchant {
+  id            String   @id @default(cuid())
+  privyId       String?  @unique   // Privy user ID (bound on first login)
+  name          String
+  handle        String?
+  ownerName     String?
+  email         String?  @unique
+  timezone      String   @default("Africa/Lagos")
+  walletAddress String?  @unique   // Solana pubkey (base58)
+  apiKey        String   @unique   // usk_live_... or usk_test_... (primary key)
+  apiKeyPrefix  String             // first 16 chars shown in dashboard
+  network       String   @default("devnet")  // "mainnet" | "devnet"
+  plan          String   @default("Starter")
+  kybStatus     String   @default("Pending")
+  webhookUrl    String?
+  webhookSecret String?            // HMAC-SHA256 signing secret
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  payments Payment[]
+  apiKeys  ApiKeyRecord[]
+  stores   Store[]
+}
+
+// ─── ApiKeyRecord ────────────────────────────────────────────────────────────
+// Multiple API keys per merchant. The full key is only shown once on creation.
+// We store a SHA-256 hash for lookup and the prefix for display.
+
+model ApiKeyRecord {
+  id          String   @id @default(cuid())
+  merchantId  String
+  merchant    Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  name        String          // Human-readable label (e.g. "Production server")
+  prefix      String          // First 16 chars (e.g. "usk_test_9pK2…")
+  hashedKey   String @unique  // SHA-256 hash of the full key (for lookup)
+  environment String          // "test" | "live"
+  scopes      String          // JSON array string (e.g. '["gateway.write","webhooks"]')
+  status      String @default("active")  // "active" | "revoked"
+  lastUsedAt  DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([merchantId])
+  @@index([hashedKey])
+}
+
+// ─── Payment ─────────────────────────────────────────────────────────────────
+// A single payment session created by a merchant.
+// Lifecycle: PENDING → CONFIRMED (or EXPIRED / CANCELLED)
+
+model Payment {
+  id         String        @id @default(cuid())
+  merchantId String
+  merchant   Merchant      @relation(fields: [merchantId], references: [id])
+
+  // Payment request
+  amount      BigInt        // raw token units (e.g. USDC 6 decimals)
+  mint        String        // SPL token mint address
+  reference   String        // merchant's own order / invoice ID
+  description String?
+  metadata    String?       // JSON string (SQLite has no Json type)
+
+  // On-chain verification
+  // Submitted by the checkout page after the user signs the createUtxo tx
+  txSignature     String?   // base58 Solana tx signature
+  submittedAmount BigInt?   // amount the checkout page reported
+
+  // Redirect / webhook URLs
+  successUrl String?
+  cancelUrl  String?
+  webhookUrl String?        // overrides merchant.webhookUrl for this session
+
+  // Status & lifecycle
+  status      String   @default("PENDING")  // PENDING|CONFIRMED|EXPIRED|CANCELLED
+  expiresAt   DateTime
+  confirmedAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  orders Order[]
+
+  @@index([merchantId])
+  @@index([merchantId, status])
+  @@index([reference])
+  @@index([createdAt])
+}
+
+// ─── Store ───────────────────────────────────────────────────────────────────
+// A merchant's e-commerce storefront. Each store has its own slug for the
+// public URL: /store/[slug] (dev) or storename.store.unseen.finance (prod).
+
+model Store {
+  id          String   @id @default(cuid())
+  merchantId  String
+  merchant    Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  name        String
+  slug        String   @unique   // URL path identifier
+  category    String?             // e.g. "Digital goods", "Merch", "SaaS"
+  description String?
+  logoUrl     String?
+  currency    String   @default("USDC")  // "USDC" | "SOL"
+  privacy     String   @default("shielded")  // "shielded" | "public"
+  status      String   @default("draft")     // "draft" | "live" | "paused"
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  products Product[]
+  orders   Order[]
+
+  @@index([merchantId])
+  @@index([slug])
+}
+
+// ─── Product ─────────────────────────────────────────────────────────────────
+// An item listed in a store. Price is in raw token units.
+
+model Product {
+  id        String   @id @default(cuid())
+  storeId   String
+  store     Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  name      String
+  shortDesc String?
+  longDesc  String?
+  price     BigInt          // raw token units
+  mint      String          // inherits from store, but can be overridden
+  imageUrl  String?
+  sku       String?
+  stock     Int?            // null = unlimited
+  status    String   @default("active")  // "active" | "archived"
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([storeId])
+  @@index([storeId, status])
+}
+
+// ─── Order ───────────────────────────────────────────────────────────────────
+// Links a storefront purchase to a Payment session.
+
+model Order {
+  id            String   @id @default(cuid())
+  storeId       String
+  store         Store    @relation(fields: [storeId], references: [id])
+  paymentId     String
+  payment       Payment  @relation(fields: [paymentId], references: [id])
+
+  customerEmail String?
+  items         String          // JSON string: [{productId, name, qty, price}]
+  totalAmount   BigInt
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([storeId])
+  @@index([paymentId])
+}
