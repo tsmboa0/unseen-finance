@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/db";
+import { Product } from "@prisma/client";
 
 type Params = { params: Promise<{ slug: string }> };
 
@@ -39,7 +40,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     where: { id: { in: productIds }, storeId: store.id, status: "active" },
   });
 
-  const productMap = new Map(products.map((p: any) => [p.id, p]));
+  const productMap = new Map<string, Product>(products.map((p) => [p.id, p]));
 
   // Validate all items exist and compute total
   let totalAmount = BigInt(0);
