@@ -9,6 +9,7 @@ import {
   getUserAccountQuerierFunction,
   getUserRegistrationFunction,
 } from "@umbra-privacy/sdk";
+import { isRegistrationError } from "@umbra-privacy/sdk/errors";
 import {
   getCreateReceiverClaimableUtxoFromPublicBalanceProver,
   getUserRegistrationProver,
@@ -279,7 +280,20 @@ function CheckoutContent({ payment }: { payment: PaymentData }) {
       setRegistrationModalOpen(false);
       setRegistrationStep(0);
     } catch (err) {
-      setRegistrationError(err instanceof Error ? err.message : "Registration failed. Please try again.");
+      if (isRegistrationError(err)) {
+        const stage = String(err.stage);
+        const stageMsg =
+          stage === "master-seed-derivation"
+            ? "Please approve the consent message in your wallet."
+            : stage === "transaction-sign"
+              ? "A wallet prompt was dismissed — each step needs your approval."
+              : stage === "zk-proof-generation"
+                ? "ZK proof generation failed. Check your connection and try again."
+                : "Registration failed. Please try again.";
+        setRegistrationError(stageMsg);
+      } else {
+        setRegistrationError(err instanceof Error ? err.message : "Registration failed. Please try again.");
+      }
       setRegistrationStep(0);
     } finally {
       setRegistrationInProgress(false);
@@ -394,7 +408,14 @@ function CheckoutContent({ payment }: { payment: PaymentData }) {
       setTxSignatures(signatures);
       setStep("success");
     } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : "Payment failed");
+      const raw = err instanceof Error ? err.message : "Payment failed";
+      // Surface a friendly message for the known devnet fee_schedule issue.
+      const msg = raw.includes("fee_schedule") || raw.includes("AccountNotInitialized")
+        ? "The Umbra protocol fee schedule is not yet initialized on this network. Please contact support or try again later."
+        : raw.includes("Transaction simulation failed")
+          ? `Transaction failed on-chain. Details: ${raw}`
+          : raw;
+      setErrorMsg(msg);
       setStep("error");
     }
   }, [walletAddress, payment]);

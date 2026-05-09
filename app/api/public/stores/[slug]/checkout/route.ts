@@ -68,10 +68,10 @@ export async function POST(req: NextRequest, { params }: Params) {
     });
   }
 
-  // Determine mint based on store currency
+  // Determine mint based on store currency (use Umbra-supported devnet addresses)
   const mint = store.currency === "SOL"
     ? "So11111111111111111111111111111111111111112"
-    : "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
+    : "4oG4sjmopf5MzvTHLE8rpVJ2uyczxfsw2K84SUTpNDx7"; // USDC devnet
 
   // Create the payment session
   const reference = `order_${store.slug}_${Date.now()}`;

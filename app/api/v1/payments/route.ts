@@ -25,7 +25,7 @@ const CreatePaymentSchema = z.object({
   metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
-const DEFAULT_MINT = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU"; // USDC devnet
+const DEFAULT_MINT = "4oG4sjmopf5MzvTHLE8rpVJ2uyczxfsw2K84SUTpNDx7"; // USDC devnet (Umbra-supported)
 
 // ─── POST /api/v1/payments — Create a payment session ────────────────────────
 

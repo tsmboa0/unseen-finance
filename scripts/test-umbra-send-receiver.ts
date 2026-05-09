@@ -55,7 +55,7 @@ config({ path: resolve(ROOT, ".env") });
 const RECIPIENT = "DcfVsDRQ7hT58hTWdAW99E7MytN4xd7KUirJMTojMgxo";
 
 // Devnet mints used by the dashboard.
-const DEVNET_USDC_MINT = "4oG4sjmopf5MzvTHLE8rpVJ2uyczxfsw2K84SUTpNDx7";
+const DEVNET_USDC_MINT = "4oG4sjmopf5MzvTHLE8rpVJ2uyczxfsw2K84SUTpNDx7"; // Umbra-supported devnet USDC
 const DEVNET_USDT_MINT = "DXQwBNGgyQ2BzGWxEriJPVmXYFQBsQbXvfvfSNTaJkL6";
 
 const ONE_USDC = BigInt(1_000_000);

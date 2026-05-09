@@ -51,13 +51,18 @@ export const KNOWN_MINTS: Record<string, { symbol: string; decimals: number }> =
       symbol: "USDC",
       decimals: 6,
     },
-    // USDC devnet
-    "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU": {
+    // USDC devnet (Umbra-supported)
+    "4oG4sjmopf5MzvTHLE8rpVJ2uyczxfsw2K84SUTpNDx7": {
       symbol: "USDC",
       decimals: 6,
     },
     // USDT mainnet
     Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB: {
+      symbol: "USDT",
+      decimals: 6,
+    },
+    // USDT devnet (Umbra-supported)
+    DXQwBNGgyQ2BzGWxEriJPVmXYFQBsQbXvfvfSNTaJkL6: {
       symbol: "USDT",
       decimals: 6,
     },
