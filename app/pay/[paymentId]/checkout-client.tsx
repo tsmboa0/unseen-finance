@@ -167,16 +167,20 @@ function CheckoutContent({ payment }: { payment: PaymentData }) {
             state?: string;
             data?: {
               isInitialised?: boolean;
+              isUserAccountX25519KeyRegistered?: boolean;
               isUserCommitmentRegistered?: boolean;
               isActiveForAnonymousUsage?: boolean;
             };
           } | null | undefined;
           const data = maybeState?.data;
+          // We register with { confidential: true, anonymous: true }, so a fully
+          // registered customer will have all three flags set.
           registered =
             maybeState?.state === "exists" &&
             data?.isInitialised === true &&
-            data.isUserCommitmentRegistered === true &&
-            data.isActiveForAnonymousUsage === true;
+            data?.isUserAccountX25519KeyRegistered === true &&
+            data?.isUserCommitmentRegistered === true &&
+            data?.isActiveForAnonymousUsage === true;
         } catch {
           // If check fails, assume not registered so we show the modal.
           registered = false;
@@ -221,21 +225,21 @@ function CheckoutContent({ payment }: { payment: PaymentData }) {
 
     setRegistrationInProgress(true);
     setRegistrationError("");
-    setRegistrationStep(1); // Step 1: Sign message
-
-    const stepTimers: ReturnType<typeof setTimeout>[] = [];
+    setRegistrationStep(1); // Step 1: Sign message (wallet will prompt)
 
     try {
       const endpoints = getDefaultSolanaEndpoints(payment.merchantNetwork);
       const signer = createSignerFromWalletAccount(walletState.wallet, walletState.account);
 
+      // getUmbraClient with deferMasterSeedSignature: false is what triggers
+      // the wallet sign prompt for the master seed. Once this resolves, step 1 is done.
       const client = await getUmbraClient(
         {
           signer,
           network: endpoints.umbraNetwork,
           rpcUrl: endpoints.rpcUrl,
           rpcSubscriptionsUrl: endpoints.rpcSubscriptionsUrl,
-          deferMasterSeedSignature: false, // triggers wallet consent signature
+          deferMasterSeedSignature: false,
         },
         {
           masterSeedStorage: createUmbraLocalMasterSeedStorage({
@@ -245,16 +249,29 @@ function CheckoutContent({ payment }: { payment: PaymentData }) {
         }
       );
 
-      // Step 1 signed → advance to step 2 after a brief moment
-      stepTimers.push(setTimeout(() => setRegistrationStep(2), 800));
+      // Master seed signed → step 2 (create account tx is next)
+      setRegistrationStep(2);
 
       const zkProver = getUserRegistrationProver();
       const register = getUserRegistrationFunction({ client }, { zkProver });
 
-      // Step 3 advances partway through (ZK proof gen / commitment registration)
-      stepTimers.push(setTimeout(() => setRegistrationStep(3), 3500));
+      // anonymous: true requires confidential: true — SDK throws otherwise.
+      // Use SDK-provided callbacks to advance the visual steps accurately.
+      await register({
+        confidential: true,
+        anonymous: true,
+        callbacks: {
+          userAccountInitialisation: {
+            // Account PDA created → advance to step 3 (key registration + ZK proof)
+            post: async () => { setRegistrationStep(3); },
+          },
+          // X25519 key registration happens silently as part of step 3.
+          // registerUserForAnonymousUsage (ZK proof + commitment) finishes step 3.
+        },
+      });
 
-      await register({ anonymous: true });
+      // Brief pause so the user sees step 3 fully lit before modal closes.
+      await new Promise<void>((resolve) => setTimeout(resolve, 800));
 
       // Registration complete — master seed already stored by the client above.
       setUmbraRegistered(true);
@@ -265,7 +282,6 @@ function CheckoutContent({ payment }: { payment: PaymentData }) {
       setRegistrationError(err instanceof Error ? err.message : "Registration failed. Please try again.");
       setRegistrationStep(0);
     } finally {
-      stepTimers.forEach(clearTimeout);
       setRegistrationInProgress(false);
     }
   }, [walletAddress, payment.merchantNetwork]);
@@ -545,7 +561,7 @@ function CheckoutContent({ payment }: { payment: PaymentData }) {
               {([
                 { label: "Sign message", n: 1 },
                 { label: "Create account", n: 2 },
-                { label: "Claim rent", n: 3 },
+                { label: "Register keys", n: 3 },
               ] as const).map(({ label, n }) => {
                 const isDone = registrationStep > n;
                 const isActive = registrationStep === n;
@@ -696,6 +712,7 @@ function extractCreateUtxoSignatures(
 
 const animationCSS = `
   @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes checkout-spin { to { transform: rotate(360deg); } }
   @keyframes fadeIn { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
   @keyframes float1 { 0%,100% { transform: translate(0,0) scale(1); } 50% { transform: translate(30px,-20px) scale(1.05); } }
   @keyframes float2 { 0%,100% { transform: translate(0,0) scale(1); } 50% { transform: translate(-20px,25px) scale(1.08); } }
