@@ -6,8 +6,13 @@ import {
   createSignerFromWalletAccount,
   getPublicBalanceToReceiverClaimableUtxoCreatorFunction,
   getUmbraClient,
+  getUserAccountQuerierFunction,
+  getUserRegistrationFunction,
 } from "@umbra-privacy/sdk";
-import { getCreateReceiverClaimableUtxoFromPublicBalanceProver } from "@umbra-privacy/web-zk-prover";
+import {
+  getCreateReceiverClaimableUtxoFromPublicBalanceProver,
+  getUserRegistrationProver,
+} from "@umbra-privacy/web-zk-prover";
 import { getWallets } from "@wallet-standard/app";
 import { StandardConnect } from "@wallet-standard/features";
 import {
@@ -57,6 +62,13 @@ function CheckoutContent({ payment }: { payment: PaymentData }) {
   const [txSignatures, setTxSignatures] = useState<string[]>([]);
   const [countdown, setCountdown] = useState("");
   const [connectAttempt, setConnectAttempt] = useState(0);
+  // Umbra registration states
+  const [umbraRegistered, setUmbraRegistered] = useState<boolean | null>(null); // null = checking
+  const [registrationModalOpen, setRegistrationModalOpen] = useState(false);
+  const [registrationInProgress, setRegistrationInProgress] = useState(false);
+  const [registrationStep, setRegistrationStep] = useState<0 | 1 | 2 | 3>(0); // 0=idle, 1,2,3=steps
+  const [registrationError, setRegistrationError] = useState("");
+  // Master seed consent states (only when already registered but no local seed)
   const [needsConsent, setNeedsConsent] = useState(false);
   const [consentLoading, setConsentLoading] = useState(false);
   const [consentError, setConsentError] = useState("");
@@ -137,8 +149,50 @@ function CheckoutContent({ payment }: { payment: PaymentData }) {
         setWalletName(wallet.name);
         setWalletAddress(account.address);
 
-        // Check whether the master seed already exists in localStorage.
-        // If not, the consent modal will auto-open so the user can sign once.
+        // ── Step A: Check Umbra on-chain registration (silent, no wallet prompt) ──
+        const endpoints = getDefaultSolanaEndpoints(payment.merchantNetwork);
+        const signer = createSignerFromWalletAccount(wallet, account);
+        let registered = false;
+        try {
+          const checkClient = await getUmbraClient({
+            signer,
+            network: endpoints.umbraNetwork,
+            rpcUrl: endpoints.rpcUrl,
+            rpcSubscriptionsUrl: endpoints.rpcSubscriptionsUrl,
+            deferMasterSeedSignature: true,
+          });
+          const query = getUserAccountQuerierFunction({ client: checkClient });
+          const state = await query(account.address as never);
+          const maybeState = state as {
+            state?: string;
+            data?: {
+              isInitialised?: boolean;
+              isUserCommitmentRegistered?: boolean;
+              isActiveForAnonymousUsage?: boolean;
+            };
+          } | null | undefined;
+          const data = maybeState?.data;
+          registered =
+            maybeState?.state === "exists" &&
+            data?.isInitialised === true &&
+            data.isUserCommitmentRegistered === true &&
+            data.isActiveForAnonymousUsage === true;
+        } catch {
+          // If check fails, assume not registered so we show the modal.
+          registered = false;
+        }
+
+        if (cancelled) return;
+        setUmbraRegistered(registered);
+
+        if (!registered) {
+          // ── Not registered: show registration modal, defer payment ──
+          setRegistrationModalOpen(true);
+          setStep("ready");
+          return;
+        }
+
+        // ── Step B: Already registered — check for local master seed ──
         const storage = createUmbraLocalMasterSeedStorage({
           walletAddress: account.address,
           network: payment.merchantNetwork,
@@ -159,6 +213,62 @@ function CheckoutContent({ payment }: { payment: PaymentData }) {
       cancelled = true;
     };
   }, [connectAttempt]);
+
+  // ─── Umbra registration (anonymous only — customers need the mixer path) ───
+  const handleRegister = useCallback(async () => {
+    const walletState = walletStateRef.current;
+    if (!walletAddress || !walletState) return;
+
+    setRegistrationInProgress(true);
+    setRegistrationError("");
+    setRegistrationStep(1); // Step 1: Sign message
+
+    const stepTimers: ReturnType<typeof setTimeout>[] = [];
+
+    try {
+      const endpoints = getDefaultSolanaEndpoints(payment.merchantNetwork);
+      const signer = createSignerFromWalletAccount(walletState.wallet, walletState.account);
+
+      const client = await getUmbraClient(
+        {
+          signer,
+          network: endpoints.umbraNetwork,
+          rpcUrl: endpoints.rpcUrl,
+          rpcSubscriptionsUrl: endpoints.rpcSubscriptionsUrl,
+          deferMasterSeedSignature: false, // triggers wallet consent signature
+        },
+        {
+          masterSeedStorage: createUmbraLocalMasterSeedStorage({
+            walletAddress,
+            network: payment.merchantNetwork,
+          }),
+        }
+      );
+
+      // Step 1 signed → advance to step 2 after a brief moment
+      stepTimers.push(setTimeout(() => setRegistrationStep(2), 800));
+
+      const zkProver = getUserRegistrationProver();
+      const register = getUserRegistrationFunction({ client }, { zkProver });
+
+      // Step 3 advances partway through (ZK proof gen / commitment registration)
+      stepTimers.push(setTimeout(() => setRegistrationStep(3), 3500));
+
+      await register({ anonymous: true });
+
+      // Registration complete — master seed already stored by the client above.
+      setUmbraRegistered(true);
+      setNeedsConsent(false);
+      setRegistrationModalOpen(false);
+      setRegistrationStep(0);
+    } catch (err) {
+      setRegistrationError(err instanceof Error ? err.message : "Registration failed. Please try again.");
+      setRegistrationStep(0);
+    } finally {
+      stepTimers.forEach(clearTimeout);
+      setRegistrationInProgress(false);
+    }
+  }, [walletAddress, payment.merchantNetwork]);
 
   // ─── One-time consent: create Umbra client to trigger master seed signing ──
   const handleConsentSign = useCallback(async () => {
@@ -409,6 +519,89 @@ function CheckoutContent({ payment }: { payment: PaymentData }) {
           <span className="checkout-powered">Powered by Unseen Finance</span>
         </div>
       </div>
+
+      {registrationModalOpen ? (
+        <div className="checkout-consent-modal-overlay">
+          <div className="checkout-consent-modal" role="dialog" aria-modal="true" style={{ maxWidth: 380 }}>
+            <div style={{ display: "flex", justifyContent: "center", marginBottom: 4 }}>
+              <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="url(#rg1)" strokeWidth="2">
+                <defs>
+                  <linearGradient id="rg1" x1="0" y1="0" x2="24" y2="24">
+                    <stop offset="0%" stopColor="#7b2fff"/>
+                    <stop offset="100%" stopColor="#a855f7"/>
+                  </linearGradient>
+                </defs>
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+              </svg>
+            </div>
+            <h3 className="checkout-consent-title">Enable private payments</h3>
+            <p className="checkout-consent-text">
+              Your wallet needs a one-time Umbra registration to send shielded payments.
+              You&apos;ll approve a signature then a few transactions — each step is shown below.
+            </p>
+
+            {/* ── Animated horizontal steps ── */}
+            <div className="checkout-reg-steps">
+              {([
+                { label: "Sign message", n: 1 },
+                { label: "Create account", n: 2 },
+                { label: "Claim rent", n: 3 },
+              ] as const).map(({ label, n }) => {
+                const isDone = registrationStep > n;
+                const isActive = registrationStep === n;
+                return (
+                  <div key={n} className="checkout-reg-step-wrap">
+                    <div
+                      className={[
+                        "checkout-reg-step",
+                        isActive ? "checkout-reg-step--active" : "",
+                        isDone ? "checkout-reg-step--done" : "",
+                      ].filter(Boolean).join(" ")}
+                    >
+                      <span className="checkout-reg-step-num">
+                        {isDone ? (
+                          <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2.5">
+                            <polyline points="2,6 5,9 10,3"/>
+                          </svg>
+                        ) : n}
+                      </span>
+                      <span className="checkout-reg-step-label">{label}</span>
+                    </div>
+                    {n < 3 && <div className={["checkout-reg-step-line", isDone ? "checkout-reg-step-line--done" : ""].filter(Boolean).join(" ")} />}
+                  </div>
+                );
+              })}
+            </div>
+
+            {registrationError ? (
+              <p className="checkout-consent-error">{registrationError}</p>
+            ) : null}
+
+            <button
+              className="checkout-pay-btn"
+              onClick={() => void handleRegister()}
+              disabled={registrationInProgress}
+              style={{ opacity: registrationInProgress ? 0.75 : 1 }}
+            >
+              {registrationInProgress ? (
+                <>
+                  <span className="checkout-consent-spinner" />
+                  Registering…
+                </>
+              ) : registrationError ? (
+                "Retry registration"
+              ) : (
+                <>
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                  </svg>
+                  Register wallet
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       {needsConsent ? (
         <div className="checkout-consent-modal-overlay">
@@ -880,6 +1073,79 @@ const animationCSS = `
     border-radius: 50%;
     animation: checkout-spin 0.7s linear infinite;
     flex-shrink: 0;
+  }
+
+  /* ── Registration steps ── */
+  .checkout-reg-steps {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0;
+    margin: 12px 0 4px;
+  }
+  .checkout-reg-step-wrap {
+    display: flex;
+    align-items: center;
+  }
+  .checkout-reg-step {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 5px;
+    min-width: 72px;
+  }
+  .checkout-reg-step-num {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    font-size: 11px;
+    font-weight: 700;
+    background: rgba(123, 47, 255, 0.08);
+    border: 1.5px solid rgba(123, 47, 255, 0.2);
+    color: #9b72cf;
+    transition: background 0.3s, border-color 0.3s, color 0.3s;
+  }
+  .checkout-reg-step--active .checkout-reg-step-num {
+    background: rgba(123, 47, 255, 0.18);
+    border-color: #7b2fff;
+    color: #7b2fff;
+    animation: checkout-reg-pulse 1.4s ease-in-out infinite;
+  }
+  .checkout-reg-step--done .checkout-reg-step-num {
+    background: #7b2fff;
+    border-color: #7b2fff;
+    color: #fff;
+  }
+  .checkout-reg-step-label {
+    font-size: 10px;
+    color: #9b72cf;
+    font-weight: 500;
+    text-align: center;
+    white-space: nowrap;
+    transition: color 0.3s;
+  }
+  .checkout-reg-step--active .checkout-reg-step-label,
+  .checkout-reg-step--done .checkout-reg-step-label {
+    color: #5c3d9e;
+  }
+  .checkout-reg-step-line {
+    width: 28px;
+    height: 2px;
+    background: rgba(123, 47, 255, 0.15);
+    margin-bottom: 16px;
+    border-radius: 2px;
+    transition: background 0.4s;
+    flex-shrink: 0;
+  }
+  .checkout-reg-step-line--done {
+    background: #7b2fff;
+  }
+  @keyframes checkout-reg-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(123, 47, 255, 0.35); }
+    50% { box-shadow: 0 0 0 5px rgba(123, 47, 255, 0); }
   }
 `;
 
