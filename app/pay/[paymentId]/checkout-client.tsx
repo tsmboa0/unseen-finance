@@ -56,11 +56,10 @@ function CheckoutContent({ payment }: { payment: PaymentData }) {
   const [errorMsg, setErrorMsg] = useState("");
   const [txSignatures, setTxSignatures] = useState<string[]>([]);
   const [countdown, setCountdown] = useState("");
-  const [consentSigned, setConsentSigned] = useState(false);
   const [connectAttempt, setConnectAttempt] = useState(0);
-  const [consentModalOpen, setConsentModalOpen] = useState(false);
-  const [consentModalStep, setConsentModalStep] = useState<"needs-sign" | "ready-to-pay">("needs-sign");
-  const [consentModalError, setConsentModalError] = useState("");
+  const [needsConsent, setNeedsConsent] = useState(false);
+  const [consentLoading, setConsentLoading] = useState(false);
+  const [consentError, setConsentError] = useState("");
   const walletStateRef = useRef<ConnectedWalletState | null>(null);
   const [walletName, setWalletName] = useState<string | null>(null);
   const [walletAddress, setWalletAddress] = useState<string | null>(null);
@@ -138,20 +137,15 @@ function CheckoutContent({ payment }: { payment: PaymentData }) {
         setWalletName(wallet.name);
         setWalletAddress(account.address);
 
-        let hasConsent = false;
-        try {
-          const raw = localStorage.getItem(getConsentStorageKey(account.address));
-          if (raw) {
-            const parsed = JSON.parse(raw) as { version?: string; signature?: string };
-            if (parsed.version === CONSENT_VERSION && typeof parsed.signature === "string") {
-              hasConsent = true;
-            }
-          }
-        } catch {
-          // ignore malformed localStorage entries
-        }
+        // Check whether the master seed already exists in localStorage.
+        // If not, the consent modal will auto-open so the user can sign once.
+        const storage = createUmbraLocalMasterSeedStorage({
+          walletAddress: account.address,
+          network: payment.merchantNetwork,
+        });
+        const seedResult = storage.load ? await storage.load() : { exists: false };
+        setNeedsConsent(!seedResult.exists);
 
-        setConsentSigned(hasConsent);
         setStep("ready");
       } catch (err) {
         if (cancelled) return;
@@ -166,46 +160,42 @@ function CheckoutContent({ payment }: { payment: PaymentData }) {
     };
   }, [connectAttempt]);
 
-  // ─── Handle payment ──────────────────────────────────────────────────────
-  const handleSignConsent = useCallback(async () => {
+  // ─── One-time consent: create Umbra client to trigger master seed signing ──
+  const handleConsentSign = useCallback(async () => {
     const walletState = walletStateRef.current;
     if (!walletAddress || !walletState) return;
 
-    const featureMap = walletState.wallet.features as unknown as MutableFeatureMap;
-    const signMessageFeature = featureMap[SolanaSignMessage] as
-      | {
-          signMessage: (input: {
-            account: WalletAccount;
-            message: Uint8Array;
-          }) => Promise<Array<{ signature: Uint8Array }>>;
+    setConsentLoading(true);
+    setConsentError("");
+    try {
+      const endpoints = getDefaultSolanaEndpoints(payment.merchantNetwork);
+      const signer = createSignerFromWalletAccount(walletState.wallet, walletState.account);
+      // Creating the client with deferMasterSeedSignature: false triggers the
+      // wallet to prompt for a signature, which generates and stores the master seed.
+      await getUmbraClient(
+        {
+          signer,
+          network: endpoints.umbraNetwork,
+          rpcUrl: endpoints.rpcUrl,
+          rpcSubscriptionsUrl: endpoints.rpcSubscriptionsUrl,
+          deferMasterSeedSignature: false,
+          indexerApiEndpoint: getDefaultUmbraIndexerUrl(payment.merchantNetwork),
+        },
+        {
+          masterSeedStorage: createUmbraLocalMasterSeedStorage({
+            walletAddress,
+            network: payment.merchantNetwork,
+          }),
         }
-      | undefined;
-    if (!signMessageFeature || typeof signMessageFeature.signMessage !== "function") {
-      throw new Error("Your wallet does not support Wallet Standard signMessage.");
+      );
+      // Master seed is now stored — dismiss the consent modal.
+      setNeedsConsent(false);
+    } catch (err) {
+      setConsentError(err instanceof Error ? err.message : "Signing failed. Please try again.");
+    } finally {
+      setConsentLoading(false);
     }
-
-    const message = new TextEncoder().encode(
-      `Unseen Pay Consent v1\nWallet: ${walletAddress}\nTimestamp: ${new Date().toISOString()}`
-    );
-    const signed = await signMessageFeature.signMessage({
-      account: walletState.account,
-      message,
-    });
-    const bytes = signed[0]?.signature;
-    if (!bytes) {
-      throw new Error("Wallet did not return a consent signature.");
-    }
-    const signature = uint8ArrayToHex(bytes);
-    localStorage.setItem(
-      getConsentStorageKey(walletAddress),
-      JSON.stringify({
-        version: CONSENT_VERSION,
-        signature,
-        signedAt: new Date().toISOString(),
-      })
-    );
-    setConsentSigned(true);
-  }, [walletAddress]);
+  }, [walletAddress, payment.merchantNetwork]);
 
   const executePayment = useCallback(async () => {
     const walletState = walletStateRef.current;
@@ -284,28 +274,7 @@ function CheckoutContent({ payment }: { payment: PaymentData }) {
   }, [walletAddress, payment]);
 
   const handlePayClick = useCallback(() => {
-    if (consentSigned) {
-      void executePayment();
-      return;
-    }
-    setConsentModalError("");
-    setConsentModalStep("needs-sign");
-    setConsentModalOpen(true);
-  }, [consentSigned, executePayment]);
-
-  const handleSignConsentFromModal = useCallback(async () => {
-    try {
-      setConsentModalError("");
-      await handleSignConsent();
-      setConsentModalStep("ready-to-pay");
-    } catch (err) {
-      setConsentModalError(err instanceof Error ? err.message : "Failed to sign consent");
-    }
-  }, [handleSignConsent]);
-
-  const handleProceedToPayment = useCallback(async () => {
-    setConsentModalOpen(false);
-    await executePayment();
+    void executePayment();
   }, [executePayment]);
 
   // ─── Render ──────────────────────────────────────────────────────────────────
@@ -416,8 +385,7 @@ function CheckoutContent({ payment }: { payment: PaymentData }) {
               className="checkout-retry-btn"
               onClick={() => {
                 setErrorMsg("");
-                setConsentModalOpen(false);
-                setConsentModalError("");
+                setConsentError("");
                 setStep("connecting");
                 setConnectAttempt((v) => v + 1);
               }}
@@ -442,39 +410,42 @@ function CheckoutContent({ payment }: { payment: PaymentData }) {
         </div>
       </div>
 
-      {consentModalOpen ? (
+      {needsConsent ? (
         <div className="checkout-consent-modal-overlay">
           <div className="checkout-consent-modal" role="dialog" aria-modal="true">
-            <h3 className="checkout-consent-title">
-              {consentModalStep === "needs-sign"
-                ? "Consent Required"
-                : "Consent Completed"}
-            </h3>
+            <div style={{ display: "flex", justifyContent: "center", marginBottom: 4 }}>
+              <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="url(#ccg)" strokeWidth="2">
+                <defs><linearGradient id="ccg" x1="0" y1="0" x2="24" y2="24"><stop offset="0%" stopColor="#7b2fff"/><stop offset="100%" stopColor="#a855f7"/></linearGradient></defs>
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+              </svg>
+            </div>
+            <h3 className="checkout-consent-title">One-time setup</h3>
             <p className="checkout-consent-text">
-              {consentModalStep === "needs-sign"
-                ? "You need to sign a one-time consent message before creating a private Umbra payment."
-                : "Consent signed successfully. You can now proceed to create your private payment."}
+              Unseen Pay uses a private key derived from your wallet signature.
+              Sign once to enable private payments — this is stored locally and never shared.
             </p>
-            {consentModalError ? (
-              <p className="checkout-consent-error">{consentModalError}</p>
+            {consentError ? (
+              <p className="checkout-consent-error">{consentError}</p>
             ) : null}
-            {consentModalStep === "needs-sign" ? (
-              <button className="checkout-pay-btn" onClick={() => void handleSignConsentFromModal()}>
-                Sign Consent
-              </button>
-            ) : (
-              <button className="checkout-pay-btn" onClick={() => void handleProceedToPayment()}>
-                Pay Privately
-              </button>
-            )}
             <button
-              className="checkout-retry-btn"
-              onClick={() => {
-                setConsentModalOpen(false);
-                setConsentModalError("");
-              }}
+              className="checkout-pay-btn"
+              onClick={() => void handleConsentSign()}
+              disabled={consentLoading}
+              style={{ opacity: consentLoading ? 0.7 : 1 }}
             >
-              Cancel
+              {consentLoading ? (
+                <>
+                  <span className="checkout-consent-spinner" />
+                  Waiting for signature…
+                </>
+              ) : (
+                <>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                  </svg>
+                  Sign to continue
+                </>
+              )}
             </button>
           </div>
         </div>
@@ -496,18 +467,6 @@ function formatTokenAmount(raw: string, decimals: number): string {
 function truncateAddress(addr: string): string {
   if (addr.length <= 12) return addr;
   return addr.slice(0, 6) + "..." + addr.slice(-4);
-}
-
-const CONSENT_VERSION = "v1";
-
-function getConsentStorageKey(walletAddress: string): string {
-  return `unseen-consent:${CONSENT_VERSION}:${walletAddress}`;
-}
-
-function uint8ArrayToHex(bytes: Uint8Array): string {
-  return Array.from(bytes)
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
 }
 
 function optionalDataHashToBytes(hash: string): Uint8Array {
@@ -910,6 +869,17 @@ const animationCSS = `
     color: #b91c1c;
     font-size: 13px;
     text-align: center;
+  }
+
+  .checkout-consent-spinner {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    border: 2px solid rgba(255,255,255,0.4);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: checkout-spin 0.7s linear infinite;
+    flex-shrink: 0;
   }
 `;
 

@@ -54,6 +54,13 @@ export default function CartPage() {
       throw new Error(data.error ?? "Checkout failed. Please try again.");
     }
 
+    console.log("[Unseen Checkout] Payment session created:", {
+      paymentId: data.paymentId,
+      checkoutUrl: data.checkoutUrl,
+      amount: data.amount,
+      reference: data.reference,
+    });
+
     return {
       id: data.paymentId,
       status: "pending",
