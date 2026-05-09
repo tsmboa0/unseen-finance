@@ -17,13 +17,13 @@ import {
   DEmptyState,
 } from "@/components/dashboard/primitives";
 import {
-  complianceReports,
-  viewingKeys,
   type ComplianceReport,
   type ViewingKey,
-} from "@/components/dashboard/mock-data";
+} from "@/lib/dashboard-types";
+import { useDashboardOverview } from "@/hooks/use-dashboard-overview";
 import { formatDate, formatRelativeTime } from "@/components/dashboard/formatters";
 import { ShieldCheck, FileDown, Key, Plus, Download, Eye } from "lucide-react";
+import { usePrivy } from "@privy-io/react-auth";
 
 const PRODUCT_OPTIONS = [
   { value: "gateway", label: "Gateway" },
@@ -45,7 +45,19 @@ function randomHex(length: number) {
 }
 
 export default function CompliancePage() {
+  const { data, loading } = useDashboardOverview();
+  const { getAccessToken } = usePrivy();
+  const complianceReports = data?.overview.complianceReports ?? [];
+  const viewingKeys = data?.overview.viewingKeys ?? [];
   const [tab, setTab] = useState("reports");
+
+  if (loading && !data) {
+    return (
+      <div className="d-card" style={{ minHeight: 220, display: "grid", placeItems: "center" }}>
+        <div style={{ width: 28, height: 28, border: "3px solid rgba(123,47,255,0.2)", borderTopColor: "#7b2fff", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+      </div>
+    );
+  }
 
   /* ── Report drawer state ── */
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -90,7 +102,28 @@ export default function CompliancePage() {
 
   function handleGenerateReport() {
     setGenerating(true);
-    setTimeout(() => {
+    setTimeout(async () => {
+      try {
+        const token = await getAccessToken();
+        if (token) {
+          await fetch("/api/dashboard/events", {
+            method: "POST",
+            headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+            body: JSON.stringify({
+              category: "compliance",
+              direction: "out",
+              status: "completed",
+              amount: 0,
+              currency: "USDC",
+              memo: reportTitle || "Compliance report generated",
+              counterparty: recipientEmail || "Internal",
+            }),
+          });
+          window.dispatchEvent(new Event("dashboard:refresh"));
+        }
+      } catch {
+        // non-blocking event log
+      }
       setGenerating(false);
       setReportSuccess(true);
     }, 2000);
@@ -107,9 +140,30 @@ export default function CompliancePage() {
 
   function handleGenerateKey() {
     setGeneratingKey(true);
-    setTimeout(() => {
+    setTimeout(async () => {
       setGeneratingKey(false);
       setGeneratedKey(`0x${randomHex(64)}`);
+      try {
+        const token = await getAccessToken();
+        if (token) {
+          await fetch("/api/dashboard/events", {
+            method: "POST",
+            headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+            body: JSON.stringify({
+              category: "compliance",
+              direction: "out",
+              status: "completed",
+              amount: 0,
+              currency: "USDC",
+              memo: `Viewing key generated (${keyScope})`,
+              counterparty: keyLabel || "Compliance key",
+            }),
+          });
+          window.dispatchEvent(new Event("dashboard:refresh"));
+        }
+      } catch {
+        // non-blocking event log
+      }
     }, 1500);
   }
 

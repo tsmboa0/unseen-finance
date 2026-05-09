@@ -2,9 +2,10 @@
 
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, Package, Minus, Plus, Trash2, Shield, ShoppingCart } from "lucide-react";
+import { ArrowLeft, Package, Minus, Plus, Trash2, ShoppingCart } from "lucide-react";
 import { useCart } from "@/components/store/cart-context";
-import { useState } from "react";
+import { useCallback, useState } from "react";
+import { UnseenPayButton, UnseenProvider, type PaymentResult } from "@unseen_fi/ui";
 
 function formatPrice(raw: string, currency: string): string {
   const decimals = currency === "SOL" ? 9 : 6;
@@ -22,38 +23,46 @@ export default function CartPage() {
   const { slug } = useParams<{ slug: string }>();
   const router = useRouter();
   const { items, removeItem, updateQty, clearCart, totalItems, totalAmount } = useCart();
-  const [checkingOut, setCheckingOut] = useState(false);
+  const [checkoutError, setCheckoutError] = useState<string | null>(null);
 
   // Read the store currency from the first item's context or default
   // We'll pass it through the URL or use USDC as default
   const currency = "USDC"; // Will be overridden by checkout API
 
-  async function handleCheckout() {
-    if (items.length === 0) return;
-    setCheckingOut(true);
+  const reference = `storefront_${slug}`;
 
-    try {
-      const res = await fetch(`/api/public/stores/${slug}/checkout`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          items: items.map((i) => ({ productId: i.productId, qty: i.qty })),
-        }),
-      });
+  const createPaymentSession = useCallback(async (): Promise<PaymentResult> => {
+    setCheckoutError(null);
+    const res = await fetch(`/api/public/stores/${slug}/checkout`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        items: items.map((i) => ({ productId: i.productId, qty: i.qty })),
+      }),
+    });
 
-      if (res.ok) {
-        const data = await res.json() as { paymentId: string; checkoutUrl: string };
-        clearCart();
-        // Redirect to our hosted checkout page
-        router.push(data.checkoutUrl);
-      } else {
-        const err = await res.json() as { error?: string };
-        alert(err.error ?? "Checkout failed. Please try again.");
-      }
-    } finally {
-      setCheckingOut(false);
+    const data = (await res.json()) as {
+      error?: string;
+      paymentId?: string;
+      checkoutUrl?: string;
+      amount?: string;
+      reference?: string;
+      paymentToken?: string;
+    };
+
+    if (!res.ok || !data.paymentId || !data.checkoutUrl || !data.amount || !data.reference) {
+      throw new Error(data.error ?? "Checkout failed. Please try again.");
     }
-  }
+
+    return {
+      id: data.paymentId,
+      status: "pending",
+      amount: data.amount,
+      checkoutUrl: data.checkoutUrl,
+      reference: data.reference,
+      paymentToken: data.paymentToken,
+    };
+  }, [items, slug]);
 
   return (
     <>
@@ -177,17 +186,28 @@ export default function CartPage() {
               </span>
             </div>
 
-            <button
-              className="sf-checkout-btn"
-              onClick={handleCheckout}
-              disabled={checkingOut || items.length === 0}
-            >
-              {checkingOut ? (
-                <>Processing…</>
-              ) : (
-                <><Shield size={16} /> Pay with Unseen</>
-              )}
-            </button>
+            <UnseenProvider baseUrl="">
+              <UnseenPayButton
+                amount={Number(totalAmount)}
+                reference={reference}
+                className="sf-checkout-btn"
+                disabled={items.length === 0}
+                createPaymentSession={createPaymentSession}
+                onSuccess={() => {
+                  clearCart();
+                  router.push(`/store/${slug}`);
+                }}
+                onError={(error) => {
+                  setCheckoutError(error.message);
+                }}
+                label="Pay with Unseen"
+              />
+            </UnseenProvider>
+            {checkoutError ? (
+              <p style={{ fontSize: 12, color: "#ef4444", textAlign: "center", marginTop: 10 }}>
+                {checkoutError}
+              </p>
+            ) : null}
 
             <p style={{
               fontSize: 12, color: "var(--color-text-muted)", textAlign: "center",

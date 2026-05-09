@@ -18,6 +18,17 @@ async function getOwnedPayment(merchantId: string, paymentId: string) {
 
 function formatPayment(p: Awaited<ReturnType<typeof getOwnedPayment>>) {
   if (!p) return null;
+  const txSignatures = p.txSignatures
+    ? (() => {
+        try {
+          const value = JSON.parse(p.txSignatures) as unknown;
+          return Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : [];
+        } catch {
+          return [];
+        }
+      })()
+    : [];
+
   return serializePayment({
     id: p.id,
     status: p.status.toLowerCase(),
@@ -27,6 +38,9 @@ function formatPayment(p: Awaited<ReturnType<typeof getOwnedPayment>>) {
     reference: p.reference,
     description: p.description,
     txSignature: p.txSignature,
+    txSignatures,
+    expectedOptionalDataHash: p.expectedOptionalDataHash,
+    submittedOptionalDataHash: p.submittedOptionalDataHash,
     checkoutUrl: `${checkoutBaseUrl}/pay/${p.id}`,
     successUrl: p.successUrl,
     cancelUrl: p.cancelUrl,

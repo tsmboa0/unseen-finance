@@ -13,9 +13,11 @@ import {
   DSelect,
   DEmptyState,
 } from "@/components/dashboard/primitives";
-import { invoices, type Invoice } from "@/components/dashboard/mock-data";
+import type { Invoice } from "@/lib/dashboard-types";
+import { useDashboardOverview } from "@/hooks/use-dashboard-overview";
 import { formatCurrency, formatDate } from "@/components/dashboard/formatters";
 import { FileText, Plus, Send, Check, Clock, AlertTriangle } from "lucide-react";
+import { usePrivy } from "@privy-io/react-auth";
 
 const statusBadge: Record<Invoice["status"], { variant: "muted" | "warning" | "success" | "error"; label: string }> = {
   draft: { variant: "muted", label: "Draft" },
@@ -25,15 +27,30 @@ const statusBadge: Record<Invoice["status"], { variant: "muted" | "warning" | "s
 };
 
 function nextInvoiceNumber(): string {
+  return `INV-${new Date().getUTCFullYear()}-001`;
+}
+
+export default function InvoicePage() {
+  const { data, loading } = useDashboardOverview();
+  const { getAccessToken } = usePrivy();
+  const invoices = data?.overview.invoices ?? [];
+
+function nextInvoiceNumberFromInvoices(): string {
   const maxNum = invoices.reduce((max, inv) => {
     const n = parseInt(inv.number.split("-").pop() ?? "0", 10);
     return n > max ? n : max;
   }, 0);
   return `INV-2026-${String(maxNum + 1).padStart(3, "0")}`;
 }
-
-export default function InvoicePage() {
   const [tab, setTab] = useState("all");
+
+  if (loading && !data) {
+    return (
+      <div className="d-card" style={{ minHeight: 220, display: "grid", placeItems: "center" }}>
+        <div style={{ width: 28, height: 28, border: "3px solid rgba(123,47,255,0.2)", borderTopColor: "#7b2fff", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+      </div>
+    );
+  }
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [sending, setSending] = useState(false);
 
@@ -101,7 +118,7 @@ export default function InvoicePage() {
   ];
 
   function resetForm() {
-    setFormNumber(nextInvoiceNumber());
+    setFormNumber(nextInvoiceNumberFromInvoices());
     setFormClient("");
     setFormEmail("");
     setFormAmount("");
@@ -115,12 +132,56 @@ export default function InvoicePage() {
   }
 
   function handleDraft() {
+    void (async () => {
+      try {
+        const token = await getAccessToken();
+        if (token) {
+          await fetch("/api/dashboard/events", {
+            method: "POST",
+            headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+            body: JSON.stringify({
+              category: "invoice",
+              direction: "in",
+              status: "pending",
+              amount: Number(formAmount || 0),
+              currency: formCurrency,
+              memo: `Invoice draft ${formNumber}`,
+              counterparty: formClient || "Client",
+            }),
+          });
+          window.dispatchEvent(new Event("dashboard:refresh"));
+        }
+      } catch {
+        // non-blocking event log
+      }
+    })();
     setDrawerOpen(false);
   }
 
   function handleSend() {
     setSending(true);
-    setTimeout(() => {
+    setTimeout(async () => {
+      try {
+        const token = await getAccessToken();
+        if (token) {
+          await fetch("/api/dashboard/events", {
+            method: "POST",
+            headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+            body: JSON.stringify({
+              category: "invoice",
+              direction: "in",
+              status: "pending",
+              amount: Number(formAmount || 0),
+              currency: formCurrency,
+              memo: `Invoice sent ${formNumber}`,
+              counterparty: formClient || formEmail || "Client",
+            }),
+          });
+          window.dispatchEvent(new Event("dashboard:refresh"));
+        }
+      } catch {
+        // non-blocking event log
+      }
       setSending(false);
       setDrawerOpen(false);
     }, 1000);
@@ -145,7 +206,7 @@ export default function InvoicePage() {
 
       <DTable
         columns={columns}
-        data={filtered}
+        data={loading ? [] : filtered}
         emptyTitle="No invoices"
         emptyDescription="Create your first invoice to get started."
       />

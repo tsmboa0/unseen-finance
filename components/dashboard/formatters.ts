@@ -1,6 +1,6 @@
 export function formatCurrency(
   amount: number,
-  currency: "USD" | "USDC" | "SOL" = "USDC",
+  currency: "USD" | "USDC" | "USDT" | "SOL" = "USDC",
   options: { compact?: boolean; decimals?: number } = {},
 ): string {
   const { compact = false, decimals } = options;

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import prisma from "@/lib/db";
-import { badRequest, notFound } from "@/lib/auth";
+import { badRequest, notFound, requirePaymentToken } from "@/lib/auth";
 import { isExpired } from "@/lib/utils";
 
 // ─── POST /api/v1/payments/:id/submit-tx ─────────────────────────────────────
@@ -15,17 +15,30 @@ import { isExpired } from "@/lib/utils";
 
 type Params = { params: Promise<{ id: string }> };
 
-const SubmitTxSchema = z.object({
-  txSignature: z
-    .string()
-    .min(64)
-    .max(100)
-    .regex(/^[1-9A-HJ-NP-Za-km-z]+$/, "Must be a valid base58 Solana signature"),
-  amount: z.number().int().positive(), // raw token units reported by checkout
-});
+const Base58SignatureSchema = z
+  .string()
+  .min(64)
+  .max(100)
+  .regex(/^[1-9A-HJ-NP-Za-km-z]+$/, "Must be a valid base58 Solana signature");
+
+const SubmitTxSchema = z
+  .object({
+    txSignature: Base58SignatureSchema.optional(),
+    txSignatures: z.array(Base58SignatureSchema).min(1).optional(),
+    amount: z.number().int().positive(), // raw token units reported by checkout
+    optionalDataHash: z
+      .string()
+      .regex(/^[0-9a-f]{64}$/i, "optionalDataHash must be a 64-char hex string"),
+  })
+  .refine((value) => value.txSignature || value.txSignatures, {
+    message: "txSignature or txSignatures is required",
+    path: ["txSignatures"],
+  });
 
 export async function POST(request: NextRequest, { params }: Params) {
   const { id } = await params;
+  const tokenAuth = await requirePaymentToken(request, id);
+  if (tokenAuth instanceof NextResponse) return tokenAuth;
 
   // Parse body
   let body: unknown;
@@ -40,11 +53,20 @@ export async function POST(request: NextRequest, { params }: Params) {
     return badRequest("Validation failed", parsed.error.flatten().fieldErrors);
   }
 
-  const { txSignature, amount } = parsed.data;
+  const { txSignature, txSignatures, amount, optionalDataHash } = parsed.data;
+  const signatures = Array.from(
+    new Set([...(txSignatures ?? []), ...(txSignature ? [txSignature] : [])])
+  );
 
   // Find payment
   const payment = await prisma.payment.findUnique({ where: { id } });
   if (!payment) return notFound("Payment");
+  if (payment.merchantId !== tokenAuth.merchantId) {
+    return NextResponse.json(
+      { error: "Payment token merchant mismatch", code: "unauthorized" },
+      { status: 401 }
+    );
+  }
 
   // Guard: only PENDING payments can receive a tx
   if (payment.status !== "PENDING") {
@@ -67,7 +89,7 @@ export async function POST(request: NextRequest, { params }: Params) {
   }
 
   // Guard: don't overwrite an existing signature (idempotency)
-  if (payment.txSignature) {
+  if (payment.txSignature || payment.txSignatures) {
     return NextResponse.json(
       { success: true, message: "Transaction already submitted" },
       { status: 200 }
@@ -78,8 +100,10 @@ export async function POST(request: NextRequest, { params }: Params) {
   await prisma.payment.update({
     where: { id },
     data: {
-      txSignature,
+      txSignature: signatures[0] ?? null,
+      txSignatures: JSON.stringify(signatures),
       submittedAmount: BigInt(amount),
+      submittedOptionalDataHash: optionalDataHash.toLowerCase(),
     },
   });
 

@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
+import { randomUUID } from "crypto";
 import prisma from "@/lib/db";
 import { Product } from "@prisma/client";
+import { buildPaymentOptionalDataHash } from "@/lib/payment-optional-data";
+import { mintPaymentToken } from "@/lib/payment-token";
 
 type Params = { params: Promise<{ slug: string }> };
 
@@ -10,10 +13,11 @@ type Params = { params: Promise<{ slug: string }> };
 
 export async function POST(req: NextRequest, { params }: Params) {
   const { slug } = await params;
+  const checkoutBaseUrl = process.env.CHECKOUT_BASE_URL ?? req.nextUrl.origin;
 
   const store = await prisma.store.findUnique({
     where: { slug },
-    include: { merchant: { select: { id: true, apiKey: true } } },
+    include: { merchant: { select: { id: true } } },
   });
 
   if (!store || store.status !== "live") {
@@ -71,16 +75,27 @@ export async function POST(req: NextRequest, { params }: Params) {
 
   // Create the payment session
   const reference = `order_${store.slug}_${Date.now()}`;
+  const paymentId = randomUUID();
+  const expectedOptionalDataHash = buildPaymentOptionalDataHash({
+    paymentId,
+    reference,
+  });
   const payment = await prisma.payment.create({
     data: {
+      id: paymentId,
       merchantId: store.merchant.id,
       amount: totalAmount,
       mint,
       reference,
       description: `Order from ${store.name} (${orderItems.length} item${orderItems.length > 1 ? "s" : ""})`,
       status: "PENDING",
+      expectedOptionalDataHash,
       expiresAt: new Date(Date.now() + 30 * 60 * 1000), // 30 minutes
     },
+  });
+  const paymentToken = mintPaymentToken({
+    paymentId: payment.id,
+    merchantId: store.merchant.id,
   });
 
   // Create the order
@@ -111,6 +126,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     currency: store.currency,
     reference,
     expiresAt: payment.expiresAt,
-    checkoutUrl: `/pay/${payment.id}`,
+    paymentToken,
+    checkoutUrl: `${checkoutBaseUrl}/pay/${payment.id}`,
   }, { status: 201 });
 }

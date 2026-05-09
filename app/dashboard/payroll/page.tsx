@@ -17,13 +17,9 @@ import {
   DEmptyState,
 } from "@/components/dashboard/primitives";
 import { Sparkline } from "@/components/dashboard/charts";
-import {
-  payrollRuns,
-  payrollTemplates,
-  sampleRecipients,
-  type PayrollRun,
-  type Recipient,
-} from "@/components/dashboard/mock-data";
+import type { PayrollRun, Recipient } from "@/lib/dashboard-types";
+import { useDashboardOverview } from "@/hooks/use-dashboard-overview";
+import { usePrivy } from "@privy-io/react-auth";
 import {
   formatCurrency,
   formatDate,
@@ -97,6 +93,11 @@ const columns = [
 ];
 
 export default function PayrollPage() {
+  const { data, loading } = useDashboardOverview();
+  const { getAccessToken } = usePrivy();
+  const payrollRuns = data?.overview.payrollRuns ?? [];
+  const payrollTemplates = data?.overview.payrollTemplates ?? [];
+  const sampleRecipients = data?.overview.sampleRecipients ?? [];
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [step, setStep] = useState(0);
   const [category, setCategory] = useState("");
@@ -105,6 +106,14 @@ export default function PayrollPage() {
   const [sourceMode, setSourceMode] = useState<"template" | "csv">("template");
   const [dispatching, setDispatching] = useState(false);
   const [dispatched, setDispatched] = useState(false);
+
+  if (loading && !data) {
+    return (
+      <div className="d-card" style={{ minHeight: 220, display: "grid", placeItems: "center" }}>
+        <div style={{ width: 28, height: 28, border: "3px solid rgba(123,47,255,0.2)", borderTopColor: "#7b2fff", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+      </div>
+    );
+  }
 
   const totalDisbursed = useMemo(
     () => payrollRuns.filter((r) => r.status === "settled").reduce((s, r) => s + r.total, 0),
@@ -137,7 +146,28 @@ export default function PayrollPage() {
 
   function handleDispatch() {
     setDispatching(true);
-    setTimeout(() => {
+    setTimeout(async () => {
+      try {
+        const token = await getAccessToken();
+        if (token) {
+          await fetch("/api/dashboard/events", {
+            method: "POST",
+            headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+            body: JSON.stringify({
+              category: "payroll",
+              direction: "out",
+              status: "completed",
+              amount: reviewTotal,
+              currency: "USDC",
+              memo: memo || "Payroll dispatch",
+              metadata: { recipients: sampleRecipients.length, category },
+            }),
+          });
+          window.dispatchEvent(new Event("dashboard:refresh"));
+        }
+      } catch {
+        // non-blocking analytics event
+      }
       setDispatching(false);
       setDispatched(true);
       setTimeout(() => setDrawerOpen(false), 1500);
@@ -176,7 +206,13 @@ export default function PayrollPage() {
 
       <section className="d-section">
         <h2 className="d-section__title">Payroll Runs</h2>
-        <DTable columns={columns} data={payrollRuns} emptyTitle="No payroll runs" />
+        {loading ? (
+          <div className="d-card" style={{ minHeight: 140, display: "grid", placeItems: "center" }}>
+            <div style={{ width: 24, height: 24, border: "3px solid rgba(123,47,255,0.2)", borderTopColor: "#7b2fff", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+          </div>
+        ) : (
+          <DTable columns={columns} data={payrollRuns} emptyTitle="No payroll runs" />
+        )}
       </section>
 
       <DDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} title="Run Payroll">
@@ -352,9 +388,9 @@ export default function PayrollPage() {
               <div className="d-success-message__icon">
                 <Check size={32} />
               </div>
-              <h3>Payroll dispatched</h3>
+                    <h3>Payroll dispatched</h3>
               <p>
-                {sampleRecipients.length} shielded transfers queued for{" "}
+                    {sampleRecipients.length} shielded transfers queued for{" "}
                 {formatCurrency(reviewTotal, "USDC")}.
               </p>
             </div>

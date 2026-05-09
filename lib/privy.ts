@@ -42,14 +42,12 @@ function getLinkedWalletAddress(accounts: unknown): string | null {
 }
 
 // ─── verifyPrivyToken ────────────────────────────────────────────────────────
-// Verifies a Privy access token and returns the user's identity.
 
 export async function verifyPrivyToken(token: string): Promise<AuthUser | null> {
   try {
     const privy = getPrivyClient();
     const claims = await privy.verifyAuthToken(token);
 
-    // Get the full user object to extract email and wallet
     const user = await privy.getUser(claims.userId);
 
     const email =
@@ -71,21 +69,27 @@ export async function verifyPrivyToken(token: string): Promise<AuthUser | null> 
 }
 
 // ─── requirePrivyAuth ────────────────────────────────────────────────────────
-// Middleware for dashboard API routes.
-// Reads the Privy access token from the Authorization header,
-// finds or creates the merchant record, and returns it.
+// Verifies the Privy Bearer token, looks up the merchant record, and returns
+// both. Does NOT auto-create a merchant — that happens only after onboarding.
+//
+// Callers receive:
+//   { merchant: Merchant | null, authUser: AuthUser | null, error: string | null }
+//
+// • merchant === null && authUser === null → unauthenticated (return 401)
+// • merchant === null && authUser !== null → authenticated but not yet onboarded
+// • merchant !== null                      → fully registered merchant
 
 export async function requirePrivyAuth(request: Request) {
   const authHeader = request.headers.get("Authorization");
   const token = authHeader?.replace("Bearer ", "").trim();
 
   if (!token) {
-    return { merchant: null, error: "Authorization header missing" };
+    return { merchant: null, authUser: null, error: "Authorization header missing" };
   }
 
   const authUser = await verifyPrivyToken(token);
   if (!authUser) {
-    return { merchant: null, error: "Invalid or expired session" };
+    return { merchant: null, authUser: null, error: "Invalid or expired session" };
   }
 
   // Find existing merchant by privyId
@@ -93,13 +97,13 @@ export async function requirePrivyAuth(request: Request) {
     where: { privyId: authUser.privyId },
   });
 
-  // If not found by privyId, try by email (legacy / existing accounts)
+  // Fallback to email lookup for legacy / pre-Privy accounts
   if (!merchant && authUser.email) {
     merchant = await prisma.merchant.findUnique({
       where: { email: authUser.email },
     });
 
-    // Bind the privyId to this existing merchant
+    // Bind the privyId so future lookups are fast
     if (merchant && !merchant.privyId) {
       merchant = await prisma.merchant.update({
         where: { id: merchant.id },
@@ -111,42 +115,22 @@ export async function requirePrivyAuth(request: Request) {
     }
   }
 
-  // First login — auto-create merchant record
-  if (!merchant) {
-    const { generateApiKey, generateWebhookSecret } = await import("@/lib/utils");
-    const apiKey = generateApiKey("test");
-    const prefix = apiKey.slice(0, 16) + "…";
-    const webhookSecret = generateWebhookSecret();
-
-    const name =
-      authUser.email
-        ? authUser.email.split("@")[0]
-        : authUser.walletAddress
-        ? authUser.walletAddress.slice(0, 8) + "…"
-        : "New Merchant";
-
-    merchant = await prisma.merchant.create({
+  // Sync wallet address if the embedded wallet changed (e.g. after Privy re-creates it).
+  // Umbra identity is bound to the key, so registration must be redone.
+  if (
+    merchant &&
+    authUser.walletAddress &&
+    merchant.walletAddress !== authUser.walletAddress
+  ) {
+    merchant = await prisma.merchant.update({
+      where: { id: merchant.id },
       data: {
-        privyId: authUser.privyId,
-        name,
-        handle: name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""),
-        ownerName: name,
-        email: authUser.email,
         walletAddress: authUser.walletAddress,
-        apiKey,
-        apiKeyPrefix: prefix,
-        webhookSecret,
-        network: "devnet",
+        umbraRegistered: false,
+        umbraRegisteredAt: null,
       },
     });
   }
 
-  if (merchant.walletAddress !== authUser.walletAddress && authUser.walletAddress) {
-    merchant = await prisma.merchant.update({
-      where: { id: merchant.id },
-      data: { walletAddress: authUser.walletAddress },
-    });
-  }
-
-  return { merchant, error: null };
+  return { merchant, authUser, error: null };
 }

@@ -15,22 +15,34 @@ import {
   DEmptyState,
 } from "@/components/dashboard/primitives";
 import {
-  tiplinks,
-  giftCards,
   type Tiplink,
   type GiftCard,
-} from "@/components/dashboard/mock-data";
+} from "@/lib/dashboard-types";
+import { useDashboardOverview } from "@/hooks/use-dashboard-overview";
 import {
   formatCurrency,
   formatDate,
   formatRelativeTime,
 } from "@/components/dashboard/formatters";
 import { Gift, Link, Plus, Copy, Send } from "lucide-react";
+import { usePrivy } from "@privy-io/react-auth";
 
 type Tab = "tiplinks" | "giftcards";
 
 export default function TiplinksPage() {
+  const { data, loading } = useDashboardOverview();
+  const { getAccessToken } = usePrivy();
+  const tiplinks = data?.overview.tiplinks ?? [];
+  const giftCards = data?.overview.giftCards ?? [];
   const [activeTab, setActiveTab] = useState<Tab>("tiplinks");
+
+  if (loading && !data) {
+    return (
+      <div className="d-card" style={{ minHeight: 220, display: "grid", placeItems: "center" }}>
+        <div style={{ width: 28, height: 28, border: "3px solid rgba(123,47,255,0.2)", borderTopColor: "#7b2fff", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+      </div>
+    );
+  }
 
   /* ── Tiplink drawer state ─────────────────────────── */
   const [tlDrawerOpen, setTlDrawerOpen] = useState(false);
@@ -81,9 +93,31 @@ export default function TiplinksPage() {
 
   function handleCreateTiplink() {
     setTlCreating(true);
-    setTimeout(() => {
+    setTimeout(async () => {
       const slug = Math.random().toString(36).slice(2, 8);
-      setTlCreatedLink(`unseen.fi/tl/${slug}`);
+      const createdLink = `unseen.fi/tl/${slug}`;
+      setTlCreatedLink(createdLink);
+      try {
+        const token = await getAccessToken();
+        if (token) {
+          await fetch("/api/dashboard/events", {
+            method: "POST",
+            headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+            body: JSON.stringify({
+              category: "tiplinks",
+              direction: "out",
+              status: "completed",
+              amount: Number(tlAmount || 0),
+              currency: tlCurrency,
+              memo: tlLabel || "Tiplink created",
+              counterparty: createdLink,
+            }),
+          });
+          window.dispatchEvent(new Event("dashboard:refresh"));
+        }
+      } catch {
+        // non-blocking event log
+      }
       setTlCreating(false);
     }, 1000);
   }
@@ -109,10 +143,32 @@ export default function TiplinksPage() {
 
   function handleCreateGiftCard() {
     setGcCreating(true);
-    setTimeout(() => {
+    setTimeout(async () => {
       const seg1 = Math.random().toString(36).slice(2, 6).toUpperCase();
       const seg2 = Math.random().toString(36).slice(2, 6).toUpperCase();
-      setGcCreatedCode(`GFT-${seg1}-${seg2}`);
+      const code = `GFT-${seg1}-${seg2}`;
+      setGcCreatedCode(code);
+      try {
+        const token = await getAccessToken();
+        if (token) {
+          await fetch("/api/dashboard/events", {
+            method: "POST",
+            headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+            body: JSON.stringify({
+              category: "tiplinks",
+              direction: "out",
+              status: "completed",
+              amount: Number(gcAmount || 0),
+              currency: "USDC",
+              memo: gcMessage || "Gift card created",
+              counterparty: gcEmail || code,
+            }),
+          });
+          window.dispatchEvent(new Event("dashboard:refresh"));
+        }
+      } catch {
+        // non-blocking event log
+      }
       setGcCreating(false);
     }, 1000);
   }
@@ -224,7 +280,7 @@ export default function TiplinksPage() {
 
           <DTable
             columns={tiplinkColumns}
-            data={tiplinks}
+            data={loading ? [] : tiplinks}
             emptyTitle="No tiplinks yet"
             emptyDescription="Create your first tiplink to send value anonymously."
           />
@@ -275,7 +331,7 @@ export default function TiplinksPage() {
 
           <DTable
             columns={giftCardColumns}
-            data={giftCards}
+            data={loading ? [] : giftCards}
             emptyTitle="No gift cards yet"
             emptyDescription="Send your first gift card."
           />

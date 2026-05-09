@@ -8,7 +8,8 @@ import { truncateMiddle } from "@/components/dashboard/formatters";
 import { useMerchantApi } from "@/hooks/use-merchant-api";
 
 export function MerchantIdentity() {
-  const [copied, setCopied] = useState(false);
+  const [copied,        setCopied]        = useState(false);
+  const [walletCopied,  setWalletCopied]  = useState(false);
   const { merchant, loading } = useMerchantApi();
 
   const merchantId = merchant?.id ?? "";
@@ -22,6 +23,13 @@ export function MerchantIdentity() {
     navigator.clipboard.writeText(merchantId);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  }
+
+  function copyWallet() {
+    if (!merchant?.walletAddress) return;
+    navigator.clipboard.writeText(merchant.walletAddress);
+    setWalletCopied(true);
+    setTimeout(() => setWalletCopied(false), 2000);
   }
 
   return (
@@ -58,7 +66,16 @@ export function MerchantIdentity() {
             </span>
             <span className="dash-identity__meta-item">
               <span className="dash-identity__meta-label">Wallet</span>
-              <span className="dash-identity__meta-value">{wallet}</span>
+              <span className="dash-identity__meta-value dash-identity__id-val">{wallet}</span>
+              <button
+                aria-label={walletCopied ? "Wallet address copied" : "Copy wallet address"}
+                className={`dash-identity__copy ${walletCopied ? "is-copied" : ""}`}
+                disabled={!merchant?.walletAddress}
+                onClick={copyWallet}
+                type="button"
+              >
+                {walletCopied ? <Check size={12} aria-hidden /> : <Copy size={12} aria-hidden />}
+              </button>
             </span>
           </div>
         </div>

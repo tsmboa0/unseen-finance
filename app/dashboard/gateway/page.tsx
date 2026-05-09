@@ -15,11 +15,8 @@ import {
   DEmptyState,
 } from "@/components/dashboard/primitives";
 import { Sparkline, AreaChart } from "@/components/dashboard/charts";
-import {
-  transactions,
-  kpis,
-  type Transaction,
-} from "@/components/dashboard/mock-data";
+import type { Transaction } from "@/lib/dashboard-types";
+import { useDashboardOverview } from "@/hooks/use-dashboard-overview";
 import {
   formatCurrency,
   formatDelta,
@@ -28,6 +25,7 @@ import {
   formatNumber,
 } from "@/components/dashboard/formatters";
 import { Shield, Copy, ExternalLink, Settings, Plus, RefreshCcw } from "lucide-react";
+import { usePrivy } from "@privy-io/react-auth";
 
 const STATUS_MAP: Record<string, { variant: "success" | "warning" | "error" | "violet"; label: string }> = {
   shielded: { variant: "success", label: "Shielded" },
@@ -36,8 +34,6 @@ const STATUS_MAP: Record<string, { variant: "success" | "warning" | "error" | "v
   released: { variant: "violet", label: "Released" },
 };
 
-const gatewayTx = transactions.filter((t) => t.product === "gateway");
-
 const tabs = [
   { id: "all", label: "All" },
   { id: "shielded", label: "Shielded" },
@@ -45,7 +41,19 @@ const tabs = [
 ];
 
 export default function GatewayPage() {
+  const { data, loading } = useDashboardOverview();
+  const { getAccessToken } = usePrivy();
+  const kpis = data?.overview.kpis;
+  const gatewayTx = (data?.overview.transactions ?? []).filter((t) => t.product === "gateway");
   const [tab, setTab] = useState("all");
+
+  if (loading && !data) {
+    return (
+      <div className="d-card" style={{ minHeight: 220, display: "grid", placeItems: "center" }}>
+        <div style={{ width: 28, height: 28, border: "3px solid rgba(123,47,255,0.2)", borderTopColor: "#7b2fff", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+      </div>
+    );
+  }
   const [search, setSearch] = useState("");
   const [modalOpen, setModalOpen] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -68,11 +76,11 @@ export default function GatewayPage() {
       );
     }
     return list;
-  }, [tab, search]);
+  }, [gatewayTx, tab, search]);
 
   const sparklineData = useMemo(
     () => gatewayTx.slice(0, 7).map((t) => t.amount).reverse(),
-    [],
+    [gatewayTx],
   );
 
   const columns = useMemo(
@@ -140,7 +148,28 @@ export default function GatewayPage() {
 
   function handleCreate() {
     setCreating(true);
-    setTimeout(() => {
+    setTimeout(async () => {
+      try {
+        const token = await getAccessToken();
+        if (token) {
+          await fetch("/api/dashboard/events", {
+            method: "POST",
+            headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+            body: JSON.stringify({
+              category: "payment",
+              direction: "in",
+              status: "pending",
+              amount: Number(formAmount || 0),
+              currency: formCurrency,
+              memo: formDescription || "Checkout session created",
+              counterparty: "Gateway checkout",
+            }),
+          });
+          window.dispatchEvent(new Event("dashboard:refresh"));
+        }
+      } catch {
+        // non-blocking event log
+      }
       setCreating(false);
       setModalOpen(false);
       resetForm();
@@ -163,19 +192,19 @@ export default function GatewayPage() {
         <DStatCard
           icon={Shield}
           label="Gateway Volume (30d)"
-          value={formatCurrency(1_086_300, "USDC", { compact: true })}
-          delta={formatDelta(kpis.totalVolumeDelta)}
+          value={formatCurrency(gatewayTx.reduce((s, t) => s + t.amount, 0), "USDC", { compact: true })}
+          delta={formatDelta(kpis?.totalVolumeDelta ?? 0)}
           sparkline={<Sparkline data={sparklineData} />}
         />
         <DStatCard
           label="Sessions"
-          value={formatNumber(842)}
-          delta={formatDelta(12.4)}
+          value={formatNumber(gatewayTx.length)}
+          delta={formatDelta(0)}
         />
         <DStatCard
           label="Avg Session Value"
-          value={formatCurrency(1_290, "USDC")}
-          delta={formatDelta(5.8)}
+          value={formatCurrency(gatewayTx.length ? gatewayTx.reduce((s, t) => s + t.amount, 0) / gatewayTx.length : 0, "USDC")}
+          delta={formatDelta(0)}
         />
       </div>
 
@@ -184,12 +213,18 @@ export default function GatewayPage() {
         <DFilterBar search={search} onSearch={setSearch} searchPlaceholder="Search payments…">
           <DTabs items={tabs} active={tab} onChange={setTab} />
         </DFilterBar>
+        {loading ? (
+          <div className="d-card" style={{ minHeight: 140, display: "grid", placeItems: "center" }}>
+            <div style={{ width: 24, height: 24, border: "3px solid rgba(123,47,255,0.2)", borderTopColor: "#7b2fff", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+          </div>
+        ) : (
         <DTable
           columns={columns}
           data={filtered}
           emptyTitle="No payments found"
           emptyDescription="Try adjusting your filters or search query."
         />
+        )}
       </div>
 
       <DModal open={modalOpen} onClose={() => { setModalOpen(false); resetForm(); }} title="Create Checkout Session">

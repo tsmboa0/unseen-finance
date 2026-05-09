@@ -2,6 +2,52 @@ import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/db";
 import { requirePrivyAuth } from "@/lib/privy";
 
+function serializeMerchant(merchant: {
+  id: string;
+  name: string;
+  businessSize: string | null;
+  industry: string | null;
+  country: string | null;
+  handle: string | null;
+  ownerName: string | null;
+  email: string | null;
+  timezone: string;
+  walletAddress: string | null;
+  apiKey: string;
+  apiKeyPrefix: string;
+  network: string;
+  plan: string;
+  kybStatus: string;
+  webhookUrl: string | null;
+  umbraRegistered: boolean;
+  umbraRegisteredAt: Date | null;
+  onboardingCompletedAt: Date | null;
+  createdAt: Date;
+}) {
+  return {
+    id: merchant.id,
+    name: merchant.name,
+    businessSize: merchant.businessSize,
+    industry: merchant.industry,
+    country: merchant.country,
+    handle: merchant.handle,
+    ownerName: merchant.ownerName,
+    email: merchant.email,
+    timezone: merchant.timezone,
+    walletAddress: merchant.walletAddress,
+    apiKey: merchant.apiKey,
+    apiKeyPrefix: merchant.apiKeyPrefix,
+    network: merchant.network,
+    plan: merchant.plan,
+    kybStatus: merchant.kybStatus,
+    webhookUrl: merchant.webhookUrl,
+    umbraRegistered: merchant.umbraRegistered,
+    umbraRegisteredAt: merchant.umbraRegisteredAt?.toISOString() ?? null,
+    onboardingCompletedAt: merchant.onboardingCompletedAt?.toISOString() ?? null,
+    createdAt: merchant.createdAt,
+  };
+}
+
 function getPrismaErrorCode(error: unknown): string | null {
   if (typeof error !== "object" || error === null || !("code" in error)) return null;
   const code = (error as { code?: unknown }).code;
@@ -19,28 +65,19 @@ function getPrismaErrorTarget(error: unknown): string[] {
 // (including their API key for subsequent API calls).
 
 export async function GET(req: NextRequest) {
-  const { merchant, error } = await requirePrivyAuth(req as unknown as Request);
+  const { merchant, authUser, error } = await requirePrivyAuth(req as unknown as Request);
 
-  if (!merchant) {
+  // Not authenticated at all
+  if (!authUser) {
     return NextResponse.json({ error: error ?? "Unauthorized" }, { status: 401 });
   }
 
-  return NextResponse.json({
-    id: merchant.id,
-    name: merchant.name,
-    handle: merchant.handle,
-    ownerName: merchant.ownerName,
-    email: merchant.email,
-    timezone: merchant.timezone,
-    walletAddress: merchant.walletAddress,
-    apiKey: merchant.apiKey,
-    apiKeyPrefix: merchant.apiKeyPrefix,
-    network: merchant.network,
-    plan: merchant.plan,
-    kybStatus: merchant.kybStatus,
-    webhookUrl: merchant.webhookUrl,
-    createdAt: merchant.createdAt,
-  });
+  // Authenticated but no merchant yet — needs to complete onboarding
+  if (!merchant) {
+    return NextResponse.json({ newUser: true }, { status: 200 });
+  }
+
+  return NextResponse.json(serializeMerchant(merchant));
 }
 
 export async function PATCH(req: NextRequest) {
@@ -52,6 +89,9 @@ export async function PATCH(req: NextRequest) {
 
   let body: {
     name?: unknown;
+    businessSize?: unknown;
+    industry?: unknown;
+    country?: unknown;
     handle?: unknown;
     ownerName?: unknown;
     email?: unknown;
@@ -66,6 +106,9 @@ export async function PATCH(req: NextRequest) {
 
   const data: {
     name?: string;
+    businessSize?: string | null;
+    industry?: string | null;
+    country?: string | null;
     handle?: string | null;
     ownerName?: string | null;
     email?: string | null;
@@ -77,6 +120,36 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: "Business name must be at least 2 characters" }, { status: 400 });
     }
     data.name = body.name.trim();
+  }
+
+  if (body.businessSize !== undefined) {
+    if (body.businessSize === null || body.businessSize === "") {
+      data.businessSize = null;
+    } else if (typeof body.businessSize === "string") {
+      data.businessSize = body.businessSize.trim();
+    } else {
+      return NextResponse.json({ error: "Business size must be a string" }, { status: 400 });
+    }
+  }
+
+  if (body.industry !== undefined) {
+    if (body.industry === null || body.industry === "") {
+      data.industry = null;
+    } else if (typeof body.industry === "string") {
+      data.industry = body.industry.trim();
+    } else {
+      return NextResponse.json({ error: "Industry must be a string" }, { status: 400 });
+    }
+  }
+
+  if (body.country !== undefined) {
+    if (body.country === null || body.country === "") {
+      data.country = null;
+    } else if (typeof body.country === "string") {
+      data.country = body.country.trim();
+    } else {
+      return NextResponse.json({ error: "Country must be a string" }, { status: 400 });
+    }
   }
 
   if (body.handle !== undefined) {
@@ -118,22 +191,7 @@ export async function PATCH(req: NextRequest) {
 
   try {
     if (Object.keys(data).length === 0) {
-      return NextResponse.json({
-        id: merchant.id,
-        name: merchant.name,
-        handle: merchant.handle,
-        ownerName: merchant.ownerName,
-        email: merchant.email,
-        timezone: merchant.timezone,
-        walletAddress: merchant.walletAddress,
-        apiKey: merchant.apiKey,
-        apiKeyPrefix: merchant.apiKeyPrefix,
-        network: merchant.network,
-        plan: merchant.plan,
-        kybStatus: merchant.kybStatus,
-        webhookUrl: merchant.webhookUrl,
-        createdAt: merchant.createdAt,
-      });
+      return NextResponse.json(serializeMerchant(merchant));
     }
 
     const updated = await prisma.merchant.update({
@@ -141,22 +199,7 @@ export async function PATCH(req: NextRequest) {
       data,
     });
 
-    return NextResponse.json({
-      id: updated.id,
-      name: updated.name,
-      handle: updated.handle,
-      ownerName: updated.ownerName,
-      email: updated.email,
-      timezone: updated.timezone,
-      walletAddress: updated.walletAddress,
-      apiKey: updated.apiKey,
-      apiKeyPrefix: updated.apiKeyPrefix,
-      network: updated.network,
-      plan: updated.plan,
-      kybStatus: updated.kybStatus,
-      webhookUrl: updated.webhookUrl,
-      createdAt: updated.createdAt,
-    });
+    return NextResponse.json(serializeMerchant(updated));
   } catch (updateError) {
     const code = getPrismaErrorCode(updateError);
     const target = getPrismaErrorTarget(updateError);

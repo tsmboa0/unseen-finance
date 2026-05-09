@@ -1,6 +1,23 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import {
+  type CreateUtxoFromPublicBalanceResult,
+  createSignerFromWalletAccount,
+  getPublicBalanceToReceiverClaimableUtxoCreatorFunction,
+  getUmbraClient,
+} from "@umbra-privacy/sdk";
+import { getCreateReceiverClaimableUtxoFromPublicBalanceProver } from "@umbra-privacy/web-zk-prover";
+import { getWallets } from "@wallet-standard/app";
+import { StandardConnect } from "@wallet-standard/features";
+import {
+  SolanaSignMessage,
+  SolanaSignTransaction,
+  type WalletWithSolanaFeatures,
+} from "@solana/wallet-standard-features";
+import type { WalletAccount } from "@wallet-standard/base";
+import { createUmbraLocalMasterSeedStorage } from "@/lib/umbra/master-seed-storage";
+import { getDefaultSolanaEndpoints, getDefaultUmbraIndexerUrl } from "@/lib/solana-endpoints";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -13,26 +30,40 @@ type PaymentData = {
   description: string | null;
   merchantName: string;
   merchantWallet: string | null;
+  merchantNetwork: string;
+  expectedOptionalDataHash: string | null;
+  paymentToken: string;
   expiresAt: string;
 };
 
 type Step = "connecting" | "ready" | "signing" | "submitting" | "success" | "error";
 
-type WalletInfo = {
-  name: string;
-  icon: string;
-  publicKey: string | null;
+type ConnectedWalletState = {
+  wallet: WalletWithSolanaFeatures;
+  account: WalletAccount;
 };
+
+type MutableFeatureMap = Record<string, unknown>;
 
 // ─── Component ──────────────────────────────────────────────────────────────
 
 export default function CheckoutClient({ payment }: { payment: PaymentData }) {
+  return <CheckoutContent payment={payment} />;
+}
+
+function CheckoutContent({ payment }: { payment: PaymentData }) {
   const [step, setStep] = useState<Step>("connecting");
-  const [wallet, setWallet] = useState<WalletInfo | null>(null);
   const [errorMsg, setErrorMsg] = useState("");
-  const [txSignature, setTxSignature] = useState("");
+  const [txSignatures, setTxSignatures] = useState<string[]>([]);
   const [countdown, setCountdown] = useState("");
-  const walletRef = useRef<unknown>(null);
+  const [consentSigned, setConsentSigned] = useState(false);
+  const [connectAttempt, setConnectAttempt] = useState(0);
+  const [consentModalOpen, setConsentModalOpen] = useState(false);
+  const [consentModalStep, setConsentModalStep] = useState<"needs-sign" | "ready-to-pay">("needs-sign");
+  const [consentModalError, setConsentModalError] = useState("");
+  const walletStateRef = useRef<ConnectedWalletState | null>(null);
+  const [walletName, setWalletName] = useState<string | null>(null);
+  const [walletAddress, setWalletAddress] = useState<string | null>(null);
 
   // ─── Format amount for display ───────────────────────────────────────────
   const displayAmount = formatTokenAmount(payment.amount, payment.mintDecimals);
@@ -55,65 +86,187 @@ export default function CheckoutClient({ payment }: { payment: PaymentData }) {
     return () => clearInterval(interval);
   }, [payment.expiresAt]);
 
-  // ─── Auto-detect & connect wallet ────────────────────────────────────────
+  // ─── Auto-detect & connect wallet (Wallet Standard) ──────────────────────
   useEffect(() => {
-    async function autoConnect() {
+    let cancelled = false;
+
+    const connectWalletStandard = async () => {
       try {
-        // Detect injected provider in wallet's in-app browser
-        const provider = detectWalletProvider();
-        if (!provider) {
-          setErrorMsg("No wallet detected. Please open this page inside your Solana wallet's browser (Phantom, Solflare, or Backpack).");
-          setStep("error");
-          return;
+        const discovered = getWallets().get() as WalletWithSolanaFeatures[];
+        const supported = discovered.filter((wallet) => {
+          const features = wallet.features as Record<string, unknown>;
+          return Boolean(features[SolanaSignTransaction] && features[SolanaSignMessage]);
+        });
+
+        if (supported.length === 0) {
+          throw new Error(
+            "No Wallet Standard wallet detected. Please open this page inside Phantom, Solflare, or Backpack in-app browser."
+          );
         }
 
-        walletRef.current = provider.instance;
-        const connected = await connectWallet(provider);
-        setWallet(connected);
+        const preferredOrder = ["Phantom", "Solflare", "Backpack"];
+        const wallet =
+          preferredOrder
+            .map((name) => supported.find((w) => w.name === name))
+            .find(Boolean) ?? supported[0];
+
+        const featureMap = wallet.features as unknown as MutableFeatureMap;
+        const connectFeature = featureMap[StandardConnect] as
+          | { connect: () => Promise<{ accounts: WalletAccount[] }> }
+          | undefined;
+        if (!connectFeature || typeof connectFeature.connect !== "function") {
+          throw new Error("Wallet does not support standard:connect.");
+        }
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          setTimeout(() => {
+            reject(
+              new Error(
+                "Wallet connection timed out. Please reopen this link inside your wallet's in-app browser."
+              )
+            );
+          }, 12_000);
+        });
+
+        const result = await Promise.race([connectFeature.connect(), timeoutPromise]);
+        const account = result.accounts[0];
+        if (!account) {
+          throw new Error("Wallet connected but no account was returned.");
+        }
+
+        if (cancelled) return;
+        walletStateRef.current = { wallet, account };
+        setWalletName(wallet.name);
+        setWalletAddress(account.address);
+
+        let hasConsent = false;
+        try {
+          const raw = localStorage.getItem(getConsentStorageKey(account.address));
+          if (raw) {
+            const parsed = JSON.parse(raw) as { version?: string; signature?: string };
+            if (parsed.version === CONSENT_VERSION && typeof parsed.signature === "string") {
+              hasConsent = true;
+            }
+          }
+        } catch {
+          // ignore malformed localStorage entries
+        }
+
+        setConsentSigned(hasConsent);
         setStep("ready");
       } catch (err) {
+        if (cancelled) return;
         setErrorMsg(err instanceof Error ? err.message : "Failed to connect wallet");
         setStep("error");
       }
-    }
+    };
 
-    // Small delay to let wallet inject its provider
-    const timer = setTimeout(autoConnect, 500);
-    return () => clearTimeout(timer);
-  }, []);
+    connectWalletStandard();
+    return () => {
+      cancelled = true;
+    };
+  }, [connectAttempt]);
 
   // ─── Handle payment ──────────────────────────────────────────────────────
-  const handlePay = useCallback(async () => {
-    if (!walletRef.current || !wallet?.publicKey) return;
+  const handleSignConsent = useCallback(async () => {
+    const walletState = walletStateRef.current;
+    if (!walletAddress || !walletState) return;
+
+    const featureMap = walletState.wallet.features as unknown as MutableFeatureMap;
+    const signMessageFeature = featureMap[SolanaSignMessage] as
+      | {
+          signMessage: (input: {
+            account: WalletAccount;
+            message: Uint8Array;
+          }) => Promise<Array<{ signature: Uint8Array }>>;
+        }
+      | undefined;
+    if (!signMessageFeature || typeof signMessageFeature.signMessage !== "function") {
+      throw new Error("Your wallet does not support Wallet Standard signMessage.");
+    }
+
+    const message = new TextEncoder().encode(
+      `Unseen Pay Consent v1\nWallet: ${walletAddress}\nTimestamp: ${new Date().toISOString()}`
+    );
+    const signed = await signMessageFeature.signMessage({
+      account: walletState.account,
+      message,
+    });
+    const bytes = signed[0]?.signature;
+    if (!bytes) {
+      throw new Error("Wallet did not return a consent signature.");
+    }
+    const signature = uint8ArrayToHex(bytes);
+    localStorage.setItem(
+      getConsentStorageKey(walletAddress),
+      JSON.stringify({
+        version: CONSENT_VERSION,
+        signature,
+        signedAt: new Date().toISOString(),
+      })
+    );
+    setConsentSigned(true);
+  }, [walletAddress]);
+
+  const executePayment = useCallback(async () => {
+    const walletState = walletStateRef.current;
+    if (!walletAddress || !walletState) return;
 
     setStep("signing");
 
     try {
-      // TODO: In Phase 2+ this will be replaced with actual Umbra SDK createUtxo call.
-      // For now, we show the flow and simulate the signing step.
-      //
-      // The real flow will be:
-      // 1. const umbraClient = getUmbraClient({ walletSigner, ... })
-      // 2. const tx = await umbraClient.createUtxo({ amount, mint, recipient: merchantWallet, ... })
-      // 3. const sig = await wallet.signAndSendTransaction(tx)
+      if (!payment.merchantWallet) {
+        throw new Error("Merchant wallet is not configured for this payment.");
+      }
 
-      // ─── Placeholder: simulate the transaction ───────────────────────────
-      // In production, this is where the Umbra SDK builds + signs the UTXO tx.
-      // For dev/demo, we simulate a 2s delay to represent signing + confirmation.
-      await new Promise((r) => setTimeout(r, 2000));
+      const endpoints = getDefaultSolanaEndpoints(payment.merchantNetwork);
+      const signer = createSignerFromWalletAccount(walletState.wallet, walletState.account);
+      const client = await getUmbraClient(
+        {
+          signer,
+          network: endpoints.umbraNetwork,
+          rpcUrl: endpoints.rpcUrl,
+          rpcSubscriptionsUrl: endpoints.rpcSubscriptionsUrl,
+          deferMasterSeedSignature: false,
+          indexerApiEndpoint: getDefaultUmbraIndexerUrl(payment.merchantNetwork),
+        },
+        {
+          masterSeedStorage: createUmbraLocalMasterSeedStorage({
+            walletAddress,
+            network: payment.merchantNetwork,
+          }),
+        }
+      );
 
-      // For testing, use a dummy sig (real integration will produce a real one)
-      const fakeSig = "simulated_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 10);
+      const createUtxo = getPublicBalanceToReceiverClaimableUtxoCreatorFunction(
+        { client },
+        { zkProver: getCreateReceiverClaimableUtxoFromPublicBalanceProver() }
+      );
+      const optionalDataHash = payment.expectedOptionalDataHash;
+      if (!optionalDataHash) {
+        throw new Error("Payment optionalData hash is missing.");
+      }
+      const createUtxoResult = await createUtxo({
+        amount: BigInt(payment.amount) as never,
+        destinationAddress: payment.merchantWallet as never,
+        mint: payment.mint as never,
+      }, {
+        optionalData: optionalDataHashToBytes(optionalDataHash) as never,
+      });
+      const signatures = extractCreateUtxoSignatures(createUtxoResult);
 
       setStep("submitting");
 
       // ─── POST the tx signature to our API ────────────────────────────────
       const res = await fetch(`/api/v1/payments/${payment.id}/submit-tx`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-unseen-payment-token": payment.paymentToken,
+        },
         body: JSON.stringify({
-          txSignature: fakeSig,
+          txSignatures: signatures,
           amount: Number(payment.amount),
+          optionalDataHash,
         }),
       });
 
@@ -122,13 +275,38 @@ export default function CheckoutClient({ payment }: { payment: PaymentData }) {
         throw new Error((data as { error?: string }).error ?? "Failed to submit transaction");
       }
 
-      setTxSignature(fakeSig);
+      setTxSignatures(signatures);
       setStep("success");
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : "Payment failed");
       setStep("error");
     }
-  }, [wallet, payment]);
+  }, [walletAddress, payment]);
+
+  const handlePayClick = useCallback(() => {
+    if (consentSigned) {
+      void executePayment();
+      return;
+    }
+    setConsentModalError("");
+    setConsentModalStep("needs-sign");
+    setConsentModalOpen(true);
+  }, [consentSigned, executePayment]);
+
+  const handleSignConsentFromModal = useCallback(async () => {
+    try {
+      setConsentModalError("");
+      await handleSignConsent();
+      setConsentModalStep("ready-to-pay");
+    } catch (err) {
+      setConsentModalError(err instanceof Error ? err.message : "Failed to sign consent");
+    }
+  }, [handleSignConsent]);
+
+  const handleProceedToPayment = useCallback(async () => {
+    setConsentModalOpen(false);
+    await executePayment();
+  }, [executePayment]);
 
   // ─── Render ──────────────────────────────────────────────────────────────────
 
@@ -172,24 +350,24 @@ export default function CheckoutClient({ payment }: { payment: PaymentData }) {
           </div>
         )}
 
-        {step === "ready" && wallet && (
+        {step === "ready" && walletAddress && walletName && (
           <div className="checkout-step">
             <div className="checkout-wallet-row">
               <div className="checkout-wallet-dot" />
               <span className="checkout-wallet-text">
-                {wallet.name} • {truncateAddress(wallet.publicKey ?? "")}
+                {walletName} • {truncateAddress(walletAddress)}
               </span>
             </div>
-            <button className="checkout-pay-btn" onClick={handlePay}>
+            <button className="checkout-pay-btn" onClick={handlePayClick}>
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                 <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
               </svg>
               Pay Privately
             </button>
-            <p className="checkout-hint">
+            {/* <p className="checkout-hint">
               Your wallet will prompt you to sign the transaction.
               This payment uses Umbra privacy — your identity stays hidden.
-            </p>
+            </p> */}
           </div>
         )}
 
@@ -219,8 +397,8 @@ export default function CheckoutClient({ payment }: { payment: PaymentData }) {
             <p className="checkout-hint">
               Return to the merchant&apos;s page and click &quot;I have paid&quot; to complete your order.
             </p>
-            {txSignature && (
-              <code className="checkout-sig">{truncateAddress(txSignature)}</code>
+            {txSignatures.length > 0 && (
+              <code className="checkout-sig">{truncateAddress(txSignatures[0])}</code>
             )}
           </div>
         )}
@@ -236,7 +414,13 @@ export default function CheckoutClient({ payment }: { payment: PaymentData }) {
             <p className="checkout-hint">{errorMsg}</p>
             <button
               className="checkout-retry-btn"
-              onClick={() => { setStep("connecting"); setErrorMsg(""); }}
+              onClick={() => {
+                setErrorMsg("");
+                setConsentModalOpen(false);
+                setConsentModalError("");
+                setStep("connecting");
+                setConnectAttempt((v) => v + 1);
+              }}
             >
               Try Again
             </button>
@@ -257,69 +441,46 @@ export default function CheckoutClient({ payment }: { payment: PaymentData }) {
           <span className="checkout-powered">Powered by Unseen Finance</span>
         </div>
       </div>
+
+      {consentModalOpen ? (
+        <div className="checkout-consent-modal-overlay">
+          <div className="checkout-consent-modal" role="dialog" aria-modal="true">
+            <h3 className="checkout-consent-title">
+              {consentModalStep === "needs-sign"
+                ? "Consent Required"
+                : "Consent Completed"}
+            </h3>
+            <p className="checkout-consent-text">
+              {consentModalStep === "needs-sign"
+                ? "You need to sign a one-time consent message before creating a private Umbra payment."
+                : "Consent signed successfully. You can now proceed to create your private payment."}
+            </p>
+            {consentModalError ? (
+              <p className="checkout-consent-error">{consentModalError}</p>
+            ) : null}
+            {consentModalStep === "needs-sign" ? (
+              <button className="checkout-pay-btn" onClick={() => void handleSignConsentFromModal()}>
+                Sign Consent
+              </button>
+            ) : (
+              <button className="checkout-pay-btn" onClick={() => void handleProceedToPayment()}>
+                Pay Privately
+              </button>
+            )}
+            <button
+              className="checkout-retry-btn"
+              onClick={() => {
+                setConsentModalOpen(false);
+                setConsentModalError("");
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
-}
-
-// ─── Wallet Detection ────────────────────────────────────────────────────────
-
-type WalletProvider = {
-  name: string;
-  instance: unknown;
-};
-
-function detectWalletProvider(): WalletProvider | null {
-  const w = typeof window !== "undefined" ? (window as unknown as Record<string, unknown>) : null;
-  if (!w) return null;
-
-  // Phantom
-  if (w.phantom && (w.phantom as Record<string, unknown>).solana) {
-    return { name: "Phantom", instance: (w.phantom as Record<string, unknown>).solana };
-  }
-
-  // Solflare
-  if (w.solflare && (w.solflare as Record<string, unknown>).isSolflare) {
-    return { name: "Solflare", instance: w.solflare };
-  }
-
-  // Backpack
-  if (w.backpack) {
-    return { name: "Backpack", instance: w.backpack };
-  }
-
-  // Generic window.solana fallback
-  if (w.solana) {
-    const sol = w.solana as Record<string, unknown>;
-    const name = sol.isPhantom ? "Phantom" : sol.isSolflare ? "Solflare" : "Solana Wallet";
-    return { name, instance: w.solana };
-  }
-
-  return null;
-}
-
-async function connectWallet(provider: WalletProvider): Promise<WalletInfo> {
-  const inst = provider.instance as Record<string, unknown>;
-
-  // Most Solana wallets expose a connect() method
-  if (typeof inst.connect === "function") {
-    const resp = await (inst.connect as () => Promise<{ publicKey: { toString: () => string } }>)();
-    return {
-      name: provider.name,
-      icon: "",
-      publicKey: resp?.publicKey?.toString() ?? null,
-    };
-  }
-
-  // If already connected (some wallets auto-connect in in-app browser)
-  if (inst.publicKey) {
-    return {
-      name: provider.name,
-      icon: "",
-      publicKey: (inst.publicKey as { toString: () => string }).toString(),
-    };
-  }
-
-  throw new Error(`Could not connect to ${provider.name}`);
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -335,6 +496,48 @@ function formatTokenAmount(raw: string, decimals: number): string {
 function truncateAddress(addr: string): string {
   if (addr.length <= 12) return addr;
   return addr.slice(0, 6) + "..." + addr.slice(-4);
+}
+
+const CONSENT_VERSION = "v1";
+
+function getConsentStorageKey(walletAddress: string): string {
+  return `unseen-consent:${CONSENT_VERSION}:${walletAddress}`;
+}
+
+function uint8ArrayToHex(bytes: Uint8Array): string {
+  return Array.from(bytes)
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+function optionalDataHashToBytes(hash: string): Uint8Array {
+  if (!/^[0-9a-f]{64}$/i.test(hash)) {
+    throw new Error("optionalData hash must be a 64-char hex string");
+  }
+  const bytes = new Uint8Array(32);
+  for (let i = 0; i < 32; i += 1) {
+    bytes[i] = Number.parseInt(hash.slice(i * 2, i * 2 + 2), 16);
+  }
+  return bytes;
+}
+
+function extractCreateUtxoSignatures(
+  result: CreateUtxoFromPublicBalanceResult
+): string[] {
+  const raw = [
+    result.createProofAccountSignature,
+    result.createUtxoSignature,
+    result.closeProofAccountSignature,
+  ];
+
+  return Array.from(
+    new Set(
+      raw
+        .filter((sig): sig is NonNullable<(typeof raw)[number]> => sig !== undefined)
+        .map((sig) => sig.toString())
+        .filter((sig) => sig.length > 0)
+    )
+  );
 }
 
 // ─── Styles ──────────────────────────────────────────────────────────────────
@@ -657,43 +860,56 @@ const animationCSS = `
     margin-top: 16px;
     justify-content: center;
   }
+
+  .checkout-consent-modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.45);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 50;
+    padding: 20px;
+  }
+
+  .checkout-consent-modal {
+    width: 100%;
+    max-width: 420px;
+    background: rgba(255, 255, 255, 0.97);
+    border: 1px solid rgba(123, 47, 255, 0.2);
+    border-radius: 20px;
+    padding: 22px;
+    box-shadow: 0 24px 60px rgba(80, 40, 180, 0.22);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .checkout-consent-title {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 700;
+    color: #1a1030;
+    text-align: center;
+  }
+
+  .checkout-consent-text {
+    margin: 0;
+    font-size: 14px;
+    line-height: 1.6;
+    color: #5c4d83;
+    text-align: center;
+  }
+
+  .checkout-consent-error {
+    margin: 0;
+    padding: 8px 10px;
+    border-radius: 10px;
+    border: 1px solid rgba(220, 38, 38, 0.2);
+    background: rgba(220, 38, 38, 0.08);
+    color: #b91c1c;
+    font-size: 13px;
+    text-align: center;
+  }
 `;
 
-// All inline styles are now minimal — layout only, colours handled by CSS classes above
-const containerStyle: React.CSSProperties = { all: "unset" as "unset" };
-const logoStyle: React.CSSProperties = { display: "contents" };
-const logoTextStyle: React.CSSProperties = {};
-const cardStyle: React.CSSProperties = { display: "contents" };
-const headerStyle: React.CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  alignItems: "center",
-  gap: "4px",
-  marginBottom: "16px",
-};
-const merchantLabelStyle: React.CSSProperties = {};
-const merchantNameStyle: React.CSSProperties = {};
-const amountBlockStyle: React.CSSProperties = {
-  display: "flex",
-  alignItems: "baseline",
-  justifyContent: "center",
-  margin: "8px 0 16px",
-};
-const amountStyle: React.CSSProperties = {};
-const currencyStyle: React.CSSProperties = {};
-const descriptionStyle: React.CSSProperties = {};
-const dividerStyle: React.CSSProperties = {};
-const stepContainerStyle: React.CSSProperties = {};
-const stepTextStyle: React.CSSProperties = {};
-const hintStyle: React.CSSProperties = {};
-const spinnerStyle: React.CSSProperties = {};
-const walletRowStyle: React.CSSProperties = {};
-const walletDotStyle: React.CSSProperties = {};
-const walletTextStyle: React.CSSProperties = {};
-const payButtonStyle: React.CSSProperties = {};
-const successCircleStyle: React.CSSProperties = {};
-const errorCircleStyle: React.CSSProperties = {};
-const sigStyle: React.CSSProperties = {};
-const footerStyle: React.CSSProperties = {};
-const timerStyle: React.CSSProperties = {};
-const poweredByStyle: React.CSSProperties = {};

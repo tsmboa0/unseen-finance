@@ -51,7 +51,7 @@ export const pageLinks = [
   { label: "Explore Gateway", href: "/products/gateway" },
   { label: "Read Documentation", href: "/docs" },
   { label: "View Pricing", href: "/pricing" },
-  { label: "Start Building", href: "/signup" },
+  { label: "Start Building", href: "/docs" },
   { label: "Contact Sales", href: "/pricing" },
   { label: "System Status", href: "https://status.unseenfi.com" },
 ] as const;

@@ -1,14 +1,14 @@
+import "./env";
 import { PrismaClient } from "@prisma/client";
-import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
-
-// Prisma 7 driver adapter for SQLite via better-sqlite3.
-// The adapter constructor expects { url: "file:./path" }.
-// Next.js auto-loads .env files, so process.env.DATABASE_URL is available.
+import { PrismaPg } from "@prisma/adapter-pg";
 
 function createPrismaClient(): PrismaClient {
-  const url = process.env.DATABASE_URL ?? "file:./dev.db";
-  const adapter = new PrismaBetterSqlite3({ url });
-  return new PrismaClient({ adapter } as never);
+  const connectionString = process.env.DATABASE_URL;
+  if (!connectionString) {
+    throw new Error("DATABASE_URL is not set");
+  }
+  const adapter = new PrismaPg({ connectionString });
+  return new PrismaClient({ adapter });
 }
 
 const globalForPrisma = globalThis as unknown as { prisma: PrismaClient };

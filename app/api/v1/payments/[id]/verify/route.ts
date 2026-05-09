@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/db";
 import { requireApiKey, notFound } from "@/lib/auth";
-import { verifyTransaction } from "@/lib/solana";
+import { verifyTransactions } from "@/lib/solana";
 import { serializePayment, getMintInfo, isExpired, signWebhookPayload } from "@/lib/utils";
 
 // ─── POST /api/v1/payments/:id/verify ────────────────────────────────────────
@@ -10,6 +10,20 @@ import { serializePayment, getMintInfo, isExpired, signWebhookPayload } from "@/
 // clicks "I have paid". Uses the stored tx signature to confirm on Solana.
 
 type Params = { params: Promise<{ id: string }> };
+
+function getPaymentSignatures(payment: { txSignature: string | null; txSignatures: string | null }): string[] {
+  const parsed = payment.txSignatures
+    ? (() => {
+        try {
+          const value = JSON.parse(payment.txSignatures) as unknown;
+          return Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : [];
+        } catch {
+          return [];
+        }
+      })()
+    : [];
+  return Array.from(new Set([...parsed, ...(payment.txSignature ? [payment.txSignature] : [])]));
+}
 
 export async function POST(request: NextRequest, { params }: Params) {
   // Auth
@@ -33,6 +47,9 @@ export async function POST(request: NextRequest, { params }: Params) {
         paymentId: payment.id,
         reference: payment.reference,
         txSignature: payment.txSignature,
+        txSignatures: getPaymentSignatures(payment),
+        expectedOptionalDataHash: payment.expectedOptionalDataHash,
+        submittedOptionalDataHash: payment.submittedOptionalDataHash,
         confirmedAmount: payment.submittedAmount,
         confirmedAt: payment.confirmedAt?.toISOString(),
       })
@@ -60,8 +77,10 @@ export async function POST(request: NextRequest, { params }: Params) {
     );
   }
 
+  const signatures = getPaymentSignatures(payment);
+
   // No tx submitted yet
-  if (!payment.txSignature) {
+  if (signatures.length === 0) {
     return NextResponse.json(
       {
         status: "pending",
@@ -73,15 +92,15 @@ export async function POST(request: NextRequest, { params }: Params) {
   }
 
   // ─── Verify on Solana ──────────────────────────────────────────────────────
-  const result = await verifyTransaction(payment.txSignature);
+  const verifyResult = await verifyTransactions(signatures);
 
-  if (!result.confirmed) {
+  if (!verifyResult.anyConfirmed) {
     return NextResponse.json(
       {
         status: "pending",
         paymentId: id,
-        txSignature: payment.txSignature,
-        error: result.reason,
+        txSignatures: signatures,
+        error: verifyResult.reason ?? "No confirmed transaction yet.",
       },
       { status: 200 }
     );
@@ -106,11 +125,47 @@ export async function POST(request: NextRequest, { params }: Params) {
     );
   }
 
+  // ─── optionalData hash check ───────────────────────────────────────────────
+  if (
+    payment.expectedOptionalDataHash &&
+    payment.submittedOptionalDataHash &&
+    payment.expectedOptionalDataHash.toLowerCase() !==
+      payment.submittedOptionalDataHash.toLowerCase()
+  ) {
+    return NextResponse.json(
+      {
+        status: "optional_data_mismatch",
+        paymentId: id,
+        expectedOptionalDataHash: payment.expectedOptionalDataHash,
+        submittedOptionalDataHash: payment.submittedOptionalDataHash,
+        error:
+          "Transaction found but optionalData hash does not match this payment.",
+      },
+      { status: 422 }
+    );
+  }
+
+  if (payment.expectedOptionalDataHash && !payment.submittedOptionalDataHash) {
+    return NextResponse.json(
+      {
+        status: "optional_data_missing",
+        paymentId: id,
+        expectedOptionalDataHash: payment.expectedOptionalDataHash,
+        error: "optionalData hash missing from submitted transaction payload.",
+      },
+      { status: 422 }
+    );
+  }
+
   // ─── Confirm payment ──────────────────────────────────────────────────────
   const confirmedAt = new Date();
   await prisma.payment.update({
     where: { id },
-    data: { status: "CONFIRMED", confirmedAt },
+    data: {
+      status: "CONFIRMED",
+      confirmedAt,
+      txSignature: verifyResult.confirmedSignature ?? payment.txSignature,
+    },
   });
 
   // ─── Fire webhook (fire-and-forget) ───────────────────────────────────────
@@ -124,7 +179,10 @@ export async function POST(request: NextRequest, { params }: Params) {
       amount: payment.amount.toString(),
       mint: payment.mint,
       mintSymbol: mintInfo.symbol,
-      txSignature: payment.txSignature,
+      txSignature: verifyResult.confirmedSignature,
+      txSignatures: signatures,
+      expectedOptionalDataHash: payment.expectedOptionalDataHash,
+      submittedOptionalDataHash: payment.submittedOptionalDataHash,
       confirmedAt: confirmedAt.toISOString(),
       metadata: payment.metadata ? JSON.parse(payment.metadata) : null,
     });
@@ -154,7 +212,10 @@ export async function POST(request: NextRequest, { params }: Params) {
       paymentId: payment.id,
       reference: payment.reference,
       amount: payment.amount,
-      txSignature: payment.txSignature,
+      txSignature: verifyResult.confirmedSignature,
+      txSignatures: signatures,
+      expectedOptionalDataHash: payment.expectedOptionalDataHash,
+      submittedOptionalDataHash: payment.submittedOptionalDataHash,
       confirmedAt: confirmedAt.toISOString(),
     })
   );

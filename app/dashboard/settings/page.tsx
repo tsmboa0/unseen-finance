@@ -15,9 +15,10 @@ import {
   DToggle,
   DEmptyState,
 } from "@/components/dashboard/primitives";
-import { team, type TeamMember } from "@/components/dashboard/mock-data";
+import type { TeamMember } from "@/lib/dashboard-types";
 import { formatRelativeTime } from "@/components/dashboard/formatters";
 import { useMerchantApi } from "@/hooks/use-merchant-api";
+import { useDashboardOverview } from "@/hooks/use-dashboard-overview";
 import {
   Settings,
   User,
@@ -31,11 +32,28 @@ import {
 } from "lucide-react";
 
 const TABS = [
-  { id: "profile", label: "Profile" },
   { id: "business", label: "Business" },
-  { id: "team", label: "Team" },
-  { id: "billing", label: "Billing" },
+  { id: "profile",  label: "Profile" },
+  { id: "team",     label: "Team" },
+  { id: "billing",  label: "Billing" },
   { id: "security", label: "Security" },
+];
+
+const BUSINESS_SIZE_OPTIONS = [
+  { value: "solo",        label: "Solo (just me)" },
+  { value: "small",       label: "2 – 10 employees" },
+  { value: "growth",      label: "11 – 50 employees" },
+  { value: "mid-market",  label: "51 – 200 employees" },
+  { value: "enterprise",  label: "200+ employees" },
+];
+
+const INDUSTRY_OPTIONS = [
+  { value: "ecommerce",  label: "E-commerce" },
+  { value: "saas",       label: "SaaS / Software" },
+  { value: "agency",     label: "Agency / Services" },
+  { value: "creator",    label: "Creator / Community" },
+  { value: "education",  label: "Education" },
+  { value: "other",      label: "Other" },
 ];
 
 const TIMEZONE_OPTIONS = [
@@ -69,8 +87,10 @@ const PLAN_FEATURES = [
 ];
 
 export default function SettingsPage() {
-  const [activeTab, setActiveTab] = useState("profile");
+  const [activeTab, setActiveTab] = useState("business");
   const { merchant, loading, updateMerchant } = useMerchantApi();
+  const { data: overviewData, loading: overviewLoading } = useDashboardOverview();
+  const team = overviewData?.overview.team ?? [];
 
   // Profile state
   const [fullName, setFullName] = useState<string | null>(null);
@@ -79,11 +99,14 @@ export default function SettingsPage() {
   const [profileSaving, setProfileSaving] = useState(false);
 
   // Business state
-  const [orgName, setOrgName] = useState<string | null>(null);
-  const [handle, setHandle] = useState<string | null>(null);
+  const [orgName,      setOrgName]      = useState<string | null>(null);
+  const [handle,       setHandle]       = useState<string | null>(null);
+  const [businessSize, setBusinessSize] = useState<string | null>(null);
+  const [industry,     setIndustry]     = useState<string | null>(null);
+  const [country,      setCountry]      = useState<string | null>(null);
   const [businessSaving, setBusinessSaving] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
-  const [saveSuccess, setSaveSuccess] = useState<string | null>(null);
+  const [saveError,    setSaveError]    = useState<string | null>(null);
+  const [saveSuccess,  setSaveSuccess]  = useState<string | null>(null);
 
   // Team state
   const [inviteOpen, setInviteOpen] = useState(false);
@@ -100,11 +123,23 @@ export default function SettingsPage() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [passwordSaving, setPasswordSaving] = useState(false);
 
-  const profileNameValue = fullName ?? merchant?.ownerName ?? merchant?.email ?? "";
-  const emailValue = email ?? merchant?.email ?? "";
-  const timezoneValue = timezone ?? merchant?.timezone ?? "Africa/Lagos";
-  const orgNameValue = orgName ?? merchant?.name ?? "";
-  const handleValue = handle ?? merchant?.handle ?? "";
+  // All hooks must be called before any conditional return
+  if ((loading || overviewLoading) && !merchant && !overviewData) {
+    return (
+      <div className="d-card" style={{ minHeight: 220, display: "grid", placeItems: "center" }}>
+        <div style={{ width: 28, height: 28, border: "3px solid rgba(123,47,255,0.2)", borderTopColor: "#7b2fff", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+      </div>
+    );
+  }
+
+  const profileNameValue  = fullName     ?? merchant?.ownerName    ?? merchant?.email ?? "";
+  const emailValue        = email        ?? merchant?.email        ?? "";
+  const timezoneValue     = timezone     ?? merchant?.timezone     ?? "Africa/Lagos";
+  const orgNameValue      = orgName      ?? merchant?.name         ?? "";
+  const handleValue       = handle       ?? merchant?.handle       ?? "";
+  const businessSizeValue = businessSize ?? merchant?.businessSize ?? "";
+  const industryValue     = industry     ?? merchant?.industry     ?? "";
+  const countryValue      = country      ?? merchant?.country      ?? "";
 
   async function saveProfile() {
     setProfileSaving(true);
@@ -133,11 +168,17 @@ export default function SettingsPage() {
     setSaveSuccess(null);
     try {
       await updateMerchant({
-        name: orgNameValue,
-        handle: handleValue,
+        name:         orgNameValue,
+        handle:       handleValue,
+        businessSize: businessSizeValue || null,
+        industry:     industryValue     || null,
+        country:      countryValue      || null,
       });
       setOrgName(null);
       setHandle(null);
+      setBusinessSize(null);
+      setIndustry(null);
+      setCountry(null);
       setSaveSuccess("Business settings saved.");
     } catch (error) {
       setSaveError(error instanceof Error ? error.message : "Unable to save business settings");
@@ -287,15 +328,9 @@ export default function SettingsPage() {
         {/* ── Business ── */}
         {activeTab === "business" && (
           <div className="d-card" style={{ padding: "1.5rem" }}>
-            <div
-              style={{
-                display: "grid",
-                gap: "1.25rem",
-                maxWidth: 480,
-              }}
-            >
+            <div style={{ display: "grid", gap: "1.25rem", maxWidth: 560 }}>
               <DInput
-                label="Organization Name"
+                label="Business Name"
                 value={orgNameValue}
                 onChange={setOrgName}
                 icon={Building2}
@@ -306,28 +341,42 @@ export default function SettingsPage() {
                 value={handleValue}
                 onChange={setHandle}
                 disabled={loading}
-                hint="Used as your merchant display handle."
+                hint="Your public merchant display handle."
               />
-              <div className="d-field">
-                <span className="d-field__label">Plan</span>
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "0.75rem",
-                  }}
-                >
-                  <span style={{ fontWeight: 600, fontSize: "0.95rem" }}>
-                    {merchant?.plan ?? "Starter"}
-                  </span>
-                  <DButton variant="ghost" size="sm">
-                    Change Plan
-                  </DButton>
-                </div>
+              <div style={{ display: "grid", gap: "1.25rem", gridTemplateColumns: "1fr 1fr" }}>
+                <DSelect
+                  label="Business Size"
+                  value={businessSizeValue}
+                  onChange={setBusinessSize}
+                  options={BUSINESS_SIZE_OPTIONS}
+                  disabled={loading}
+                />
+                <DSelect
+                  label="Industry"
+                  value={industryValue}
+                  onChange={setIndustry}
+                  options={INDUSTRY_OPTIONS}
+                  disabled={loading}
+                />
               </div>
-              <div className="d-field">
-                <span className="d-field__label">KYB Status</span>
-                <div>
+              <DInput
+                label="Country"
+                value={countryValue}
+                onChange={setCountry}
+                disabled={loading}
+              />
+              <div style={{ display: "grid", gap: "1rem", gridTemplateColumns: "1fr 1fr" }}>
+                <div className="d-field">
+                  <span className="d-field__label">Plan</span>
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+                    <span style={{ fontWeight: 600, fontSize: "0.95rem" }}>
+                      {merchant?.plan ?? "Starter"}
+                    </span>
+                    <DButton variant="ghost" size="sm">Change Plan</DButton>
+                  </div>
+                </div>
+                <div className="d-field">
+                  <span className="d-field__label">KYB Status</span>
                   <DBadge variant="success" dot>
                     {merchant?.kybStatus ?? "Pending"}
                   </DBadge>
@@ -355,7 +404,7 @@ export default function SettingsPage() {
               </DButton>
             </div>
 
-            <DTable columns={teamColumns} data={team} />
+            <DTable columns={teamColumns} data={overviewLoading ? [] : team} />
 
             <DModal
               open={inviteOpen}

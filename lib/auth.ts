@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "./db";
+import { verifyPaymentToken } from "./payment-token";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -86,4 +87,39 @@ export function badRequest(message: string, details?: unknown) {
     { error: message, code: "bad_request", details },
     { status: 400 }
   );
+}
+
+// ─── Checkout Payment Token Auth ─────────────────────────────────────────────
+
+export async function requirePaymentToken(
+  request: NextRequest,
+  paymentId: string
+): Promise<{ merchantId: string } | NextResponse> {
+  const token =
+    request.headers.get("x-unseen-payment-token") ??
+    request.nextUrl.searchParams.get("paymentToken") ??
+    "";
+
+  if (!token) {
+    return NextResponse.json(
+      { error: "Missing payment token", code: "unauthorized" },
+      { status: 401 }
+    );
+  }
+
+  const payload = verifyPaymentToken(token);
+  if (!payload) {
+    return NextResponse.json(
+      { error: "Invalid payment token", code: "unauthorized" },
+      { status: 401 }
+    );
+  }
+  if (payload.paymentId !== paymentId) {
+    return NextResponse.json(
+      { error: "Payment token does not match payment", code: "unauthorized" },
+      { status: 401 }
+    );
+  }
+
+  return { merchantId: payload.merchantId };
 }

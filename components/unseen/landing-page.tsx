@@ -27,6 +27,7 @@ import {
 } from "react";
 import { SiteShell } from "@/components/unseen/site-shell";
 import { usePrivy } from "@privy-io/react-auth";
+import { useRouter } from "next/navigation";
 
 const HeroPhones = dynamic(() => import("@/components/unseen/hero-phones"), {
   ssr: false,
@@ -380,7 +381,8 @@ export function LandingPage() {
   const [stage, setStage] = useState(0);
   const [activeTab, setActiveTab] = useState<TabId>("gateway");
   const [activeRow, setActiveRow] = useState<number>(-1);
-  const { login } = usePrivy();
+  const { login, ready, authenticated } = usePrivy();
+  const router = useRouter();
 
   useEffect(() => {
     const timers = [
@@ -842,7 +844,7 @@ export function LandingPage() {
             </h2>
             <div className="final-cta__actions">
               <Link className="primary-link primary-link--hero" href="/signup">
-                <span className="primary-link__label">Start Building</span>
+                <span className="primary-link__label">Read Docs</span>
                 <ArrowRight aria-hidden="true" className="button-arrow" size={16} />
               </Link>
               <Link className="hero-docs-link" href="/pricing">
@@ -852,7 +854,13 @@ export function LandingPage() {
             <p className="final-cta__login">
               Already have an account?{" "}
               <button
-                onClick={() => login()}
+                onClick={() => {
+                  if (ready && authenticated) {
+                    router.push("/dashboard");
+                  } else {
+                    login();
+                  }
+                }}
                 style={{
                   background: "none",
                   border: "none",

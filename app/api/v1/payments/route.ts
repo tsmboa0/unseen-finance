@@ -8,6 +8,8 @@ import {
   serializePayment,
   getMintInfo,
 } from "@/lib/utils";
+import { buildPaymentOptionalDataHash } from "@/lib/payment-optional-data";
+import { mintPaymentToken } from "@/lib/payment-token";
 
 // ─── Validation schema ────────────────────────────────────────────────────────
 
@@ -50,6 +52,10 @@ export async function POST(request: NextRequest) {
   const mint = data.mint ?? DEFAULT_MINT;
   const expiresAt = addSeconds(new Date(), data.expiresIn);
   const id = generatePaymentId();
+  const expectedOptionalDataHash = buildPaymentOptionalDataHash({
+    paymentId: id,
+    reference: data.reference,
+  });
   const checkoutBaseUrl =
     process.env.CHECKOUT_BASE_URL ?? "http://localhost:3000";
 
@@ -67,10 +73,15 @@ export async function POST(request: NextRequest) {
       webhookUrl: data.webhookUrl ?? null,
       status: "PENDING",
       expiresAt,
+      expectedOptionalDataHash,
     },
   });
 
   const mintInfo = getMintInfo(mint);
+  const paymentToken = mintPaymentToken({
+    paymentId: payment.id,
+    merchantId: merchant.id,
+  });
 
   return NextResponse.json(
     serializePayment({
@@ -81,6 +92,8 @@ export async function POST(request: NextRequest) {
       mintSymbol: mintInfo.symbol,
       reference: payment.reference,
       description: payment.description,
+      expectedOptionalDataHash: payment.expectedOptionalDataHash,
+      paymentToken,
       checkoutUrl: `${checkoutBaseUrl}/pay/${payment.id}`,
       expiresAt: payment.expiresAt.toISOString(),
       createdAt: payment.createdAt.toISOString(),
@@ -132,6 +145,18 @@ export async function GET(request: NextRequest) {
   return NextResponse.json(
     serializePayment({
       data: items.map((p) => ({
+        txSignatures: p.txSignatures
+          ? (() => {
+              try {
+                const value = JSON.parse(p.txSignatures) as unknown;
+                return Array.isArray(value)
+                  ? value.filter((v): v is string => typeof v === "string")
+                  : [];
+              } catch {
+                return [];
+              }
+            })()
+          : [],
         id: p.id,
         status: p.status.toLowerCase(),
         amount: p.amount,
@@ -140,6 +165,8 @@ export async function GET(request: NextRequest) {
         reference: p.reference,
         description: p.description,
         txSignature: p.txSignature,
+        expectedOptionalDataHash: p.expectedOptionalDataHash,
+        submittedOptionalDataHash: p.submittedOptionalDataHash,
         checkoutUrl: `${checkoutBaseUrl}/pay/${p.id}`,
         expiresAt: p.expiresAt.toISOString(),
         confirmedAt: p.confirmedAt?.toISOString() ?? null,

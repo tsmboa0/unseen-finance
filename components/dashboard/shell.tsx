@@ -24,8 +24,9 @@ import {
 import { type ReactNode, useState, useEffect, useRef } from "react";
 import { UnseenLogo } from "@/components/unseen/logo";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { notifications } from "@/components/dashboard/mock-data";
 import { formatRelativeTime } from "@/components/dashboard/formatters";
+import { useDashboardOverview } from "@/hooks/use-dashboard-overview";
+import { OnboardingFlow } from "@/components/dashboard/onboarding-flow";
 
 type NavItem = {
   label: string;
@@ -85,6 +86,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="dash">
+      <OnboardingFlow />
       <aside className={`dash-sidebar ${sidebarOpen ? "is-open" : ""}`}>
         <div className="dash-sidebar__head">
           <div className="dash-sidebar__logo">
@@ -197,6 +199,8 @@ function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
   const [notiOpen, setNotiOpen] = useState(false);
   const notiRef = useRef<HTMLDivElement>(null);
   const { login, authenticated, user } = usePrivy();
+  const { data } = useDashboardOverview();
+  const notifications = data?.overview.notifications ?? [];
   const unread = notifications.filter((n) => n.unread).length;
 
   const wallet = user?.wallet?.address ?? null;

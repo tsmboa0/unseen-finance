@@ -2,12 +2,16 @@
 
 import { usePrivy } from "@privy-io/react-auth";
 import { useState, useEffect, useCallback, useRef } from "react";
+import { useRouter } from "next/navigation";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export type MerchantProfile = {
   id: string;
   name: string;
+  businessSize: string | null;
+  industry: string | null;
+  country: string | null;
   handle: string | null;
   ownerName: string | null;
   email: string | null;
@@ -19,6 +23,9 @@ export type MerchantProfile = {
   plan: string;
   kybStatus: string;
   webhookUrl: string | null;
+  umbraRegistered: boolean;
+  umbraRegisteredAt: string | null;
+  onboardingCompletedAt: string | null;
   createdAt: string;
 };
 
@@ -29,25 +36,44 @@ export type MerchantProfile = {
 
 export function useMerchantApi() {
   const { getAccessToken, authenticated } = usePrivy();
+  const router = useRouter();
   const [merchant, setMerchant] = useState<MerchantProfile | null>(null);
+  const [isNewUser, setIsNewUser] = useState(false);
   const [loading, setLoading] = useState(true);
   const apiKeyRef = useRef<string | null>(null);
 
   const fetchMerchantProfile = useCallback(async (): Promise<MerchantProfile | null> => {
     const privyToken = await getAccessToken();
-    if (!privyToken) return null;
+    if (!privyToken) {
+      router.replace("/");
+      return null;
+    }
 
     const res = await fetch("/api/dashboard/me", {
       headers: { Authorization: `Bearer ${privyToken}` },
     });
 
-    if (!res.ok) return null;
+    if (!res.ok) {
+      if (res.status === 401 || res.status === 403) {
+        router.replace("/");
+      }
+      return null;
+    }
 
-    const data = (await res.json()) as MerchantProfile;
-    setMerchant(data);
-    apiKeyRef.current = data.apiKey;
-    return data;
-  }, [getAccessToken]);
+    const data = (await res.json()) as MerchantProfile | { newUser: true };
+
+    // Authenticated but no merchant yet — awaiting onboarding completion
+    if ("newUser" in data && data.newUser === true) {
+      setMerchant(null);
+      setIsNewUser(true);
+      return null;
+    }
+
+    setIsNewUser(false);
+    setMerchant(data as MerchantProfile);
+    apiKeyRef.current = (data as MerchantProfile).apiKey;
+    return data as MerchantProfile;
+  }, [getAccessToken, router]);
 
   // Fetch merchant profile (runs once on mount / auth change)
   useEffect(() => {
@@ -76,9 +102,19 @@ export function useMerchantApi() {
   }, [authenticated, fetchMerchantProfile]);
 
   const updateMerchant = useCallback(
-    async (payload: Partial<Pick<MerchantProfile, "name" | "handle" | "ownerName" | "email" | "timezone">>) => {
+    async (
+      payload: Partial<
+        Pick<
+          MerchantProfile,
+          "name" | "businessSize" | "industry" | "country" | "handle" | "ownerName" | "email" | "timezone"
+        >
+      >,
+    ) => {
       const privyToken = await getAccessToken();
-      if (!privyToken) throw new Error("Not authenticated");
+      if (!privyToken) {
+        router.replace("/");
+        throw new Error("Session expired. Redirecting to landing page.");
+      }
 
       const res = await fetch("/api/dashboard/me", {
         method: "PATCH",
@@ -90,6 +126,10 @@ export function useMerchantApi() {
       });
 
       if (!res.ok) {
+        if (res.status === 401 || res.status === 403) {
+          router.replace("/");
+          throw new Error("Session expired. Redirecting to landing page.");
+        }
         const body = (await res.json().catch(() => null)) as { error?: string } | null;
         throw new Error(body?.error ?? "Unable to update merchant");
       }
@@ -99,7 +139,7 @@ export function useMerchantApi() {
       apiKeyRef.current = updated.apiKey;
       return updated;
     },
-    [getAccessToken],
+    [getAccessToken, router],
   );
 
   // Convenience fetcher that auto-injects the merchant's API key
@@ -116,7 +156,11 @@ export function useMerchantApi() {
             const data = (await res.json()) as MerchantProfile;
             apiKeyRef.current = data.apiKey;
             setMerchant(data);
+          } else if (res.status === 401 || res.status === 403) {
+            router.replace("/");
           }
+        } else {
+          router.replace("/");
         }
       }
 
@@ -131,8 +175,8 @@ export function useMerchantApi() {
 
       return fetch(path, { ...init, headers });
     },
-    [getAccessToken]
+    [getAccessToken, router]
   );
 
-  return { merchant, loading, apiFetch, refreshMerchant: fetchMerchantProfile, updateMerchant };
+  return { merchant, isNewUser, loading, apiFetch, refreshMerchant: fetchMerchantProfile, updateMerchant };
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import {
   DPageHeader,
   DStatCard,
@@ -12,15 +12,9 @@ import {
 import { AreaChart, DonutChart, BarChart, Sparkline } from "@/components/dashboard/charts";
 import { BalanceCard } from "@/components/dashboard/balance-card";
 import { MerchantIdentity } from "@/components/dashboard/merchant-identity";
-import {
-  kpis,
-  volume30d,
-  productBreakdown,
-  dailyVolume,
-  transactions,
-  type Transaction,
-  type Product,
-} from "@/components/dashboard/mock-data";
+import { UmbraRegistrationBanner } from "@/components/dashboard/umbra-registration-banner";
+import type { Product, Transaction } from "@/lib/dashboard-types";
+import { useDashboardOverview } from "@/hooks/use-dashboard-overview";
 import {
   formatCurrency,
   formatDelta,
@@ -29,7 +23,7 @@ import {
   formatRelativeTime,
   truncateMiddle,
 } from "@/components/dashboard/formatters";
-import { Activity, DollarSign, ShieldCheck, Users, Zap } from "lucide-react";
+import { Activity, DollarSign, ShieldCheck, Users, Zap, ChevronLeft, ChevronRight } from "lucide-react";
 
 const PRODUCT_COLORS: Record<string, string> = {
   gateway: "#7b2fff",
@@ -38,6 +32,11 @@ const PRODUCT_COLORS: Record<string, string> = {
   x402: "#6366f1",
   invoice: "#818cf8",
   tiplinks: "#d8b4fe",
+  transfer: "#0ea5e9",
+  claim: "#22c55e",
+  shield: "#14b8a6",
+  unshield: "#f59e0b",
+  payment: "#7b2fff",
 };
 
 const PRODUCT_LABELS: Record<Product, string> = {
@@ -47,10 +46,18 @@ const PRODUCT_LABELS: Record<Product, string> = {
   x402: "x402",
   invoice: "Invoice",
   tiplinks: "Tiplinks",
+  transfer: "Transfer",
+  claim: "Claim",
+  shield: "Shield",
+  unshield: "Unshield",
+  payment: "Payment",
 };
 
 const STATUS_MAP: Record<string, { variant: "success" | "warning" | "error" | "violet"; label: string }> = {
   shielded: { variant: "success", label: "Shielded" },
+  claimed: { variant: "success", label: "Claimed" },
+  transferred: { variant: "violet", label: "Transferred" },
+  unshielded: { variant: "violet", label: "Unshielded" },
   pending: { variant: "warning", label: "Pending" },
   failed: { variant: "error", label: "Failed" },
   released: { variant: "violet", label: "Released" },
@@ -65,6 +72,15 @@ const txTabs = [
 export default function DashboardHome() {
   const [txFilter, setTxFilter] = useState("all");
   const [txSearch, setTxSearch] = useState("");
+  const [page, setPage] = useState(1);
+  const itemsPerPage = 10;
+  const { data, loading } = useDashboardOverview();
+  const overview = data?.overview;
+  const kpis = overview?.kpis;
+  const volume30d = overview?.volume30d ?? [];
+  const productBreakdown = overview?.productBreakdown ?? [];
+  const dailyVolume = overview?.dailyVolume ?? [];
+  const transactions = overview?.transactions ?? [];
 
   const d = formatDelta;
 
@@ -75,7 +91,7 @@ export default function DashboardHome() {
         const d = new Date(p.t);
         return `${d.getMonth() + 1}/${d.getDate()}`;
       });
-  }, []);
+  }, [volume30d]);
 
   const areaSeries = useMemo(
     () => [
@@ -83,7 +99,7 @@ export default function DashboardHome() {
       { label: "Outflow", color: "#a855f7", data: volume30d.map((p) => p.outflow) },
       { label: "Shielded", color: "var(--color-success)", data: volume30d.map((p) => p.shielded) },
     ],
-    [],
+    [volume30d],
   );
 
   const donutSlices = useMemo(
@@ -93,12 +109,12 @@ export default function DashboardHome() {
         value: p.volume,
         color: PRODUCT_COLORS[p.product] ?? "#7b2fff",
       })),
-    [],
+    [productBreakdown],
   );
 
   const last7Inflow = useMemo(
     () => volume30d.slice(-7).map((p) => p.inflow),
-    [],
+    [volume30d],
   );
 
   const filteredTx = useMemo(() => {
@@ -114,7 +130,18 @@ export default function DashboardHome() {
       );
     }
     return list;
+  }, [transactions, txFilter, txSearch]);
+
+  useEffect(() => {
+    setPage(1);
   }, [txFilter, txSearch]);
+
+  const totalPages = Math.ceil(filteredTx.length / itemsPerPage) || 1;
+
+  const paginatedTx = useMemo(() => {
+    const start = (page - 1) * itemsPerPage;
+    return filteredTx.slice(start, start + itemsPerPage);
+  }, [filteredTx, page, itemsPerPage]);
 
   const txColumns = useMemo(
     () => [
@@ -152,7 +179,7 @@ export default function DashboardHome() {
         key: "status",
         header: "Status",
         render: (r: Transaction) => {
-          const s = STATUS_MAP[r.status];
+          const s = STATUS_MAP[r.status] ?? { variant: "warning" as const, label: r.status };
           return <DBadge variant={s.variant} dot>{s.label}</DBadge>;
         },
         width: "120px",
@@ -183,11 +210,20 @@ export default function DashboardHome() {
   return (
     <>
       <MerchantIdentity />
+      <div style={{ marginBottom: 24 }}>
+        <UmbraRegistrationBanner />
+      </div>
 
       <DPageHeader
         title="Analytics"
         description="30-day overview of your Unseen Finance activity."
       />
+      {loading || !kpis ? (
+        <div className="dash-chart-card glass-card" style={{ minHeight: 220, display: "grid", placeItems: "center" }}>
+          <div style={{ width: 28, height: 28, border: "3px solid rgba(123,47,255,0.2)", borderTopColor: "#7b2fff", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+        </div>
+      ) : (
+        <>
 
       <div className="dash-balance-row">
         <BalanceCard />
@@ -259,8 +295,40 @@ export default function DashboardHome() {
         <DFilterBar search={txSearch} onSearch={setTxSearch} searchPlaceholder="Search transactions…">
           <DTabs items={txTabs} active={txFilter} onChange={setTxFilter} />
         </DFilterBar>
-        <DTable columns={txColumns} data={filteredTx} emptyTitle="No transactions found" />
+        <DTable columns={txColumns} data={paginatedTx} emptyTitle="No transactions found" />
+        
+        {totalPages > 1 && (
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "16px", padding: "0 8px" }}>
+            <span style={{ fontSize: "13px", color: "var(--color-text-muted)", fontWeight: 500 }}>
+              Showing {(page - 1) * itemsPerPage + 1} - {Math.min(page * itemsPerPage, filteredTx.length)} of {filteredTx.length}
+            </span>
+            <div style={{ display: "flex", gap: "8px" }}>
+              <button
+                type="button"
+                className="d-btn d-btn--secondary d-btn--sm"
+                onClick={() => setPage(p => Math.max(1, p - 1))}
+                disabled={page === 1}
+                style={{ display: "flex", alignItems: "center", gap: "6px" }}
+              >
+                <ChevronLeft size={14} aria-hidden />
+                <span>Previous</span>
+              </button>
+              <button
+                type="button"
+                className="d-btn d-btn--secondary d-btn--sm"
+                onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                disabled={page === totalPages}
+                style={{ display: "flex", alignItems: "center", gap: "6px" }}
+              >
+                <span>Next</span>
+                <ChevronRight size={14} aria-hidden />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
+      </>
+      )}
     </>
   );
 }

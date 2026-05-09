@@ -3,7 +3,7 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
 }
 
 // ─── Merchant ────────────────────────────────────────────────────────────────
@@ -14,6 +14,9 @@ model Merchant {
   id            String   @id @default(cuid())
   privyId       String?  @unique   // Privy user ID (bound on first login)
   name          String
+  businessSize  String?
+  industry      String?
+  country       String?
   handle        String?
   ownerName     String?
   email         String?  @unique
@@ -26,12 +29,19 @@ model Merchant {
   kybStatus     String   @default("Pending")
   webhookUrl    String?
   webhookSecret String?            // HMAC-SHA256 signing secret
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  /// True after the merchant completes Umbra on-chain registration (encrypted + anonymous) for walletAddress.
+  umbraRegistered   Boolean   @default(false)
+  umbraRegisteredAt DateTime?
+  onboardingCompletedAt DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
   payments Payment[]
   apiKeys  ApiKeyRecord[]
   stores   Store[]
+  umbraScanCursors UmbraUtxoScanCursor[]
+  umbraUtxos UmbraMerchantUtxo[]
+  dashboardEvents DashboardEvent[]
 }
 
 // ─── ApiKeyRecord ────────────────────────────────────────────────────────────
@@ -75,8 +85,11 @@ model Payment {
 
   // On-chain verification
   // Submitted by the checkout page after the user signs the createUtxo tx
-  txSignature     String?   // base58 Solana tx signature
+  txSignature     String?   // legacy single base58 Solana tx signature
+  txSignatures    String?   // JSON string array of base58 signatures returned by Umbra createUtxo
   submittedAmount BigInt?   // amount the checkout page reported
+  expectedOptionalDataHash  String? // sha256 hash (hex) derived from payment context; used for deterministic tx binding
+  submittedOptionalDataHash String? // hash (hex) reported by hosted checkout for the submitted createUtxo
 
   // Redirect / webhook URLs
   successUrl String?
@@ -168,4 +181,78 @@ model Order {
 
   @@index([storeId])
   @@index([paymentId])
+}
+
+// ─── Umbra UTXO Scan Cursor ───────────────────────────────────────────────────
+// Persists the dashboard's last scanned insertion index for a given merchant wallet.
+// This allows UTXO scanning to resume across refreshes and devices.
+
+model UmbraUtxoScanCursor {
+  id                String   @id @default(cuid())
+  merchantId         String
+  merchant           Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  network            String   // "mainnet" | "devnet"
+  walletAddress      String   // base58 (merchant.walletAddress)
+  treeIndex          Int      @default(0)
+  nextInsertionIndex Int      @default(0)
+  updatedAt          DateTime @updatedAt
+  createdAt          DateTime @default(now())
+
+  @@unique([merchantId, network, walletAddress])
+  @@index([merchantId])
+  @@index([walletAddress])
+}
+
+// ─── Umbra Merchant UTXOs ─────────────────────────────────────────────────────
+// Durable list of scanned UTXOs for each merchant wallet, with claim state.
+// This prevents older unclaimed UTXOs from disappearing in UI as scan cursor advances.
+
+model UmbraMerchantUtxo {
+  id             String   @id @default(cuid())
+  merchantId      String
+  merchant        Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  network         String
+  walletAddress   String
+  treeIndex       Int
+  insertionIndex  Int
+  amount          Float
+  currency        String
+  usdValue        Float
+  sender          String?
+  age             String?
+  unlockerType    String?
+  status          String   @default("claimable") // claimable | claiming | claimed | claim_failed
+  claimTxSignature String?
+  claimError      String?
+  claimedAt       DateTime?
+  lastSeenAt      DateTime @default(now())
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([merchantId, network, walletAddress, treeIndex, insertionIndex])
+  @@index([merchantId, status])
+  @@index([walletAddress, status])
+}
+
+// ─── Dashboard Event Stream ───────────────────────────────────────────────────
+// Unified activity log for analytics/recent activity charts and feed.
+model DashboardEvent {
+  id           String   @id @default(cuid())
+  merchantId    String
+  merchant      Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  network       String
+  walletAddress String?
+  category      String   // payment | transfer | claim | shield | unshield | payroll | invoice | tiplinks | compliance
+  direction     String   @default("in") // in | out
+  status        String   @default("completed") // completed | pending | failed
+  amount        Float
+  currency      String
+  counterparty  String?
+  memo          String?
+  txHash        String?
+  metadata      String?
+  createdAt     DateTime @default(now())
+
+  @@index([merchantId, createdAt])
+  @@index([merchantId, category])
 }

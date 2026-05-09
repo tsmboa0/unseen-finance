@@ -245,7 +245,8 @@ canvas {
   position: fixed;
   top: 0;
   transform: translate(-50%, -50%);
-  z-index: 10001;
+  /* Above third-party overlays (e.g. Privy login modal uses z-index: 999999). */
+  z-index: 2000000;
 }
 
 #cursor-dot {
@@ -268,7 +269,6 @@ canvas {
     border-color 0.2s,
     opacity 0.3s;
   width: 32px;
-  z-index: 10000;
 }
 
 .cursor-dot-shell,
@@ -4783,6 +4783,241 @@ body.cursor-hover #cursor-ring {
   min-width: 0;
 }
 
+/* ─── Umbra registration banner ─────────────────────────── */
+
+.dash-umbra-banner {
+  align-items: center;
+  background: rgba(220, 38, 38, 0.1);
+  border: 1px solid rgba(220, 38, 38, 0.25);
+  border-radius: 12px;
+  color: var(--color-text-primary);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 16px;
+  justify-content: space-between;
+  padding: 8px 24px;
+}
+
+.dash-umbra-banner__left {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
+}
+
+.dash-umbra-banner__icon {
+  color: #ef4444;
+  flex-shrink: 0;
+  margin-top: 0;
+}
+
+.dash-umbra-banner__left > div {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+}
+
+.dash-umbra-banner__title {
+  color: #ef4444;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.dash-umbra-banner__body {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  line-height: 1.4;
+  margin: 0;
+}
+
+.dash-umbra-banner__btn {
+  align-items: center;
+  background: #ef4444;
+  border: none;
+  border-radius: 6px;
+  color: #ffffff;
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 600;
+  gap: 6px;
+  margin-left: auto;
+  padding: 6px 12px;
+  white-space: nowrap;
+  transition: background 0.2s;
+}
+
+.dash-umbra-banner__btn:hover:not(:disabled) {
+  background: #dc2626;
+}
+
+.dash-umbra-banner__btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.dash-umbra-modal-overlay {
+  align-items: center;
+  background: var(--color-overlay);
+  backdrop-filter: blur(8px);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 24px;
+  position: fixed;
+  z-index: 200;
+  animation: umbra-fade-in 0.2s ease-out;
+}
+
+@keyframes umbra-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.dash-umbra-modal {
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-line-soft);
+  border-radius: 16px;
+  box-shadow: var(--shadow-card);
+  max-height: min(90vh, 560px);
+  max-width: 460px;
+  overflow: auto;
+  padding: 28px 24px 24px;
+  position: relative;
+  width: 100%;
+  animation: umbra-slide-up 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes umbra-slide-up {
+  from { opacity: 0; transform: translateY(20px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.dash-umbra-modal__close {
+  background: var(--color-violet-shimmer);
+  border: 1px solid transparent;
+  border-radius: 50%;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  padding: 6px;
+  position: absolute;
+  right: 16px;
+  top: 16px;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.dash-umbra-modal__close:hover {
+  background: var(--color-bg-card-hover);
+  border-color: var(--color-violet-border);
+  color: var(--color-text-primary);
+  transform: scale(1.05);
+}
+
+.dash-umbra-modal__heading {
+  align-items: center;
+  color: var(--color-text-primary);
+  display: flex;
+  gap: 12px;
+  font-size: 18px;
+  font-weight: 700;
+  margin: 0 0 16px;
+  letter-spacing: -0.01em;
+}
+
+.dash-umbra-modal__heading svg {
+  color: #a855f7;
+}
+
+.dash-umbra-modal__copy {
+  color: var(--color-text-secondary);
+  font-size: 14px;
+  line-height: 1.6;
+  margin: 0 0 16px;
+}
+
+.dash-umbra-modal__copy strong {
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+
+.dash-umbra-modal__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: flex-end;
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid var(--color-line-soft);
+}
+
+.dash-umbra-modal__ghost {
+  background: transparent;
+  border: 1px solid var(--color-violet-border);
+  border-radius: 10px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 10px 18px;
+  transition: all 0.2s ease;
+}
+
+.dash-umbra-modal__ghost:hover:not(:disabled) {
+  background: var(--color-violet-shimmer);
+  border-color: var(--color-violet-border-hover);
+  color: var(--color-text-primary);
+}
+
+.dash-umbra-modal__primary {
+  align-items: center;
+  background: var(--gradient-violet);
+  border: none;
+  border-radius: 10px;
+  color: #fff;
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 13px;
+  font-weight: 600;
+  gap: 8px;
+  padding: 10px 20px;
+  transition: opacity 0.2s, transform 0.1s;
+  box-shadow: 0 4px 12px rgba(123, 47, 255, 0.25);
+}
+
+.dash-umbra-modal__primary:hover:not(:disabled) {
+  opacity: 0.9;
+  transform: translateY(-1px);
+}
+
+.dash-umbra-modal__primary:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.dash-umbra-modal__primary:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+  box-shadow: none;
+}
+
+.dash-umbra-modal__error {
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  border-radius: 10px;
+  color: var(--color-terminal-red);
+  font-size: 13px;
+  font-weight: 500;
+  margin-top: 16px;
+  padding: 12px 16px;
+}
+
 .dash-topbar {
   align-items: center;
   background: rgba(8, 5, 16, 0.75);
@@ -8034,3 +8269,5 @@ body.cursor-hover #cursor-ring {
   0% { opacity: 1; }
   50% { opacity: 0; }
 }
+
+/* ───────── DASHBOARD ONBOARDING — styles live inline in onboarding-flow.tsx ── */

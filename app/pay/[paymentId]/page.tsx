@@ -1,6 +1,7 @@
 import prisma from "@/lib/db";
 import CheckoutClient from "./checkout-client";
 import { serializePayment, getMintInfo, isExpired } from "@/lib/utils";
+import { mintPaymentToken } from "@/lib/payment-token";
 
 type Params = { params: Promise<{ paymentId: string }> };
 
@@ -9,7 +10,7 @@ export default async function CheckoutPage({ params }: Params) {
 
   const payment = await prisma.payment.findUnique({
     where: { id: paymentId },
-    include: { merchant: { select: { name: true, walletAddress: true } } },
+    include: { merchant: { select: { name: true, walletAddress: true, network: true } } },
   });
 
   if (!payment) {
@@ -35,6 +36,10 @@ export default async function CheckoutPage({ params }: Params) {
   }
 
   const mintInfo = getMintInfo(payment.mint);
+  const paymentToken = mintPaymentToken({
+    paymentId: payment.id,
+    merchantId: payment.merchantId,
+  });
   const serialized = serializePayment({
     id: payment.id,
     amount: payment.amount,
@@ -44,6 +49,9 @@ export default async function CheckoutPage({ params }: Params) {
     description: payment.description,
     merchantName: payment.merchant.name,
     merchantWallet: payment.merchant.walletAddress,
+    merchantNetwork: payment.merchant.network,
+    expectedOptionalDataHash: payment.expectedOptionalDataHash,
+    paymentToken,
     expiresAt: payment.expiresAt.toISOString(),
   });
 

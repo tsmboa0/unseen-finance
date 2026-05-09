@@ -1,22 +1,31 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { DBadge, DButton, DModal } from "@/components/dashboard/primitives";
-import {
-  publicBalances,
-  shieldedBalances,
-  unclaimedUtxos,
-  type UTXO,
-} from "@/components/dashboard/mock-data";
+import { useMemo, useState, useEffect } from "react";
+import { usePrivy } from "@privy-io/react-auth";
+import { getSolBalance, getTokenBalance } from "@/lib/solana";
+import { DBadge, DButton, DModal, DInput, DSelect } from "@/components/dashboard/primitives";
+type UTXO = {
+  id: string;
+  amount: number;
+  currency: "SOL" | "USDC" | "USDT";
+  usdValue: number;
+  age: string;
+  sender: string;
+  status: "claimable" | "claiming" | "claimed";
+};
 import { formatCurrency } from "@/components/dashboard/formatters";
+import { useUmbraPrivateActions } from "@/hooks/use-umbra-private-actions";
+import { useDashboardOverview } from "@/hooks/use-dashboard-overview";
 import {
+  ArrowDown,
   ArrowDownToLine,
   Clock,
   Eye,
   EyeOff,
-  Fingerprint,
+  Send,
+  Shield,
   ShieldCheck,
-  Sparkles,
+  Unlock,
   User2,
   Wallet,
 } from "lucide-react";
@@ -28,10 +37,34 @@ const tabs: Array<{ id: BalanceTab; label: string; description: string }> = [
   { id: "private", label: "Private", description: "Shielded funds" },
 ];
 
-const balanceHistory: Record<BalanceTab, number[]> = {
-  public: [12_400, 12_920, 13_600, 13_340, 14_180, 14_960, 15_380, 16_120, 15_940, 16_668],
-  private: [4_520, 4_780, 4_740, 5_180, 5_640, 5_910, 6_080, 6_420, 6_560, 6_711],
-};
+function buildHistorySeries(args: {
+  points: Array<{ inflow: number; outflow: number; shielded: number }>;
+  currentTotal: number;
+  mode: BalanceTab;
+}): number[] {
+  const { points, currentTotal, mode } = args;
+  const minPoints = 10;
+  if (points.length === 0) return Array.from({ length: minPoints }, () => currentTotal);
+
+  const raw = points.map((p) =>
+    mode === "public" ? p.inflow - p.outflow : p.shielded,
+  );
+  const cumulative: number[] = [];
+  let running = 0;
+  for (const v of raw) {
+    running += v;
+    cumulative.push(running);
+  }
+  const first = cumulative[0] ?? 0;
+  const normalized = cumulative.map((v) => v - first);
+  const last = normalized[normalized.length - 1] ?? 0;
+  const offset = currentTotal - last;
+  const shifted = normalized.map((v) => v + offset);
+
+  if (shifted.length >= minPoints) return shifted;
+  const pad = Array.from({ length: minPoints - shifted.length }, () => shifted[0] ?? currentTotal);
+  return [...pad, ...shifted];
+}
 
 function BalanceLineChart({ data, mode }: { data: number[]; mode: BalanceTab }) {
   const width = 420;
@@ -93,21 +126,133 @@ function BalanceLineChart({ data, mode }: { data: number[]; mode: BalanceTab }) 
 }
 
 export function BalanceCard() {
+  const { user } = usePrivy();
+  const { data: overviewData } = useDashboardOverview();
   const [activeTab, setActiveTab] = useState<BalanceTab>("public");
-  const [utxos, setUtxos] = useState<UTXO[]>(unclaimedUtxos);
   const [claimingId, setClaimingId] = useState<string | null>(null);
   const [showAmounts, setShowAmounts] = useState(true);
   const [utxoModalOpen, setUtxoModalOpen] = useState(false);
 
-  const balances = activeTab === "public" ? publicBalances : shieldedBalances;
+  const [transferModalOpen, setTransferModalOpen] = useState(false);
+  const [transferAddress, setTransferAddress] = useState("");
+  const [transferAmount, setTransferAmount] = useState("");
+  const [transferCurrency, setTransferCurrency] = useState("USDC");
+  const [publicTransferMode, setPublicTransferMode] = useState<"normal" | "utxo">("normal");
+  const [privateTransferMode, setPrivateTransferMode] = useState<"encrypted" | "utxo">("utxo");
+  const [isTransferring, setIsTransferring] = useState(false);
+
+  const [shieldModalOpen, setShieldModalOpen] = useState(false);
+  const [shieldAmount, setShieldAmount] = useState("");
+  const [shieldCurrency, setShieldCurrency] = useState("USDC");
+  const [isShielding, setIsShielding] = useState(false);
+  const [realBalances, setRealBalances] = useState([
+    { currency: "SOL", amount: 0, usdValue: 0 },
+    { currency: "USDC", amount: 0, usdValue: 0 },
+    { currency: "USDT", amount: 0, usdValue: 0 },
+  ]);
+  const [localActionError, setLocalActionError] = useState<string | null>(null);
+
+  const {
+    privateBalances,
+    utxos,
+    canUseUmbraActions,
+    syncingPrivateBalances,
+    syncingClaimableUtxos,
+    actionError,
+    setActionError,
+    shieldFromPublic,
+    unshieldToPublic,
+    transferFromPrivate,
+    transferFromPublic,
+    claimOne,
+    claimAll,
+  } = useUmbraPrivateActions();
+
+  useEffect(() => {
+    const walletAddress = user?.wallet?.address;
+    if (!walletAddress) return;
+
+    let isMounted = true;
+    async function fetchBalances() {
+      const USDC_MINT = "4oG4sjmopf5MzvTHLE8rpVJ2uyczxfsw2K84SUTpNDx7";
+      const USDT_MINT = "DXQwBNGgyQ2BzGWxEriJPVmXYFQBsQbXvfvfSNTaJkL6";
+
+      const [sol, usdc, usdt] = await Promise.all([
+        getSolBalance(walletAddress!),
+        getTokenBalance(walletAddress!, USDC_MINT),
+        getTokenBalance(walletAddress!, USDT_MINT)
+      ]);
+
+      if (!isMounted) return;
+
+      const solPrice = 170;
+
+      setRealBalances([
+        { currency: "SOL", amount: sol, usdValue: sol * solPrice },
+        { currency: "USDC", amount: usdc, usdValue: usdc },
+        { currency: "USDT", amount: usdt, usdValue: usdt },
+      ]);
+    }
+
+    fetchBalances();
+    const interval = setInterval(fetchBalances, 15000);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, [user?.wallet?.address]);
+
+  useEffect(() => {
+    if (activeTab === "public" && publicTransferMode === "utxo" && transferCurrency === "SOL") {
+      setTransferCurrency("USDC");
+    }
+  }, [activeTab, publicTransferMode, transferCurrency]);
+
+  const balances = activeTab === "public" ? realBalances : privateBalances;
   const totalUsd = balances.reduce((sum, b) => sum + b.usdValue, 0);
-  const history = balanceHistory[activeTab];
+  const history = useMemo(
+    () =>
+      buildHistorySeries({
+        points: overviewData?.overview.volume30d ?? [],
+        currentTotal: totalUsd,
+        mode: activeTab,
+      }),
+    [activeTab, overviewData?.overview.volume30d, totalUsd],
+  );
   const previousValue = history[history.length - 2] ?? totalUsd;
   const trendDelta = totalUsd - previousValue;
   const trendPercent = previousValue > 0 ? (trendDelta / previousValue) * 100 : 0;
   const claimableUtxos = utxos.filter((u) => u.status === "claimable");
+  const pendingUtxos = utxos;
   const claimableTotal = claimableUtxos.reduce((sum, u) => sum + u.usdValue, 0);
   const privateSol = balances.find((b) => b.currency === "SOL")?.amount ?? 0;
+
+  const publicStats = useMemo(
+    () => [
+      {
+        label: "Send tokens",
+        value: "Transfer",
+        detail: "Send public tokens",
+        icon: Send,
+        action: true,
+      },
+      {
+        label: "Shield tokens",
+        value: "Hide",
+        detail: "Move to private balance",
+        icon: Shield,
+        action: true,
+      },
+      {
+        label: "Receive",
+        value: "Deposit",
+        detail: "Show public address",
+        icon: ArrowDown,
+        action: true,
+      },
+    ],
+    [],
+  );
 
   const privateStats = useMemo(
     () => [
@@ -119,35 +264,96 @@ export function BalanceCard() {
         action: true,
       },
       {
-        label: "Privacy set",
-        value: "8.4k",
-        detail: "Current anonymity pool",
-        icon: Fingerprint,
+        label: "Send UTXO",
+        value: "Transfer",
+        detail: "Send shielded tokens",
+        icon: Send,
+        action: true,
       },
       {
-        label: "Shielded SOL",
-        value: privateSol.toLocaleString("en-US", { maximumFractionDigits: 2 }),
-        detail: "Across private notes",
-        icon: Sparkles,
+        label: "UnShield tokens",
+        value: "Reveal",
+        detail: "Move to public balance",
+        icon: Unlock,
+        action: true,
       },
     ],
-    [claimableTotal, claimableUtxos.length, privateSol],
+    [claimableTotal, claimableUtxos.length],
   );
 
   async function handleClaim(utxoId: string) {
     setClaimingId(utxoId);
-    await new Promise((r) => setTimeout(r, 1800));
-    setUtxos((prev) =>
-      prev.map((u) => (u.id === utxoId ? { ...u, status: "claimed" as const } : u)),
-    );
-    setClaimingId(null);
+    try {
+      await claimOne(utxoId);
+    } finally {
+      setClaimingId(null);
+    }
   }
 
   async function handleClaimAll() {
     setClaimingId("all");
-    await new Promise((r) => setTimeout(r, 2500));
-    setUtxos((prev) => prev.map((u) => ({ ...u, status: "claimed" as const })));
-    setClaimingId(null);
+    try {
+      await claimAll();
+    } finally {
+      setClaimingId(null);
+    }
+  }
+
+  async function handleTransfer() {
+    setIsTransferring(true);
+    setLocalActionError(null);
+    setActionError(null);
+    try {
+      if (activeTab === "private") {
+        if (!canUseUmbraActions) {
+          throw new Error("Complete Umbra registration and ensure wallet is synced before private transfers.");
+        }
+        await transferFromPrivate({
+          currency: transferCurrency as "USDC" | "USDT" | "SOL",
+          amount: transferAmount,
+          destinationAddress: transferAddress,
+          transferType: privateTransferMode,
+        });
+      } else {
+        await transferFromPublic({
+          currency: transferCurrency as "USDC" | "USDT" | "SOL",
+          amount: transferAmount,
+          destinationAddress: transferAddress,
+          transferMode: publicTransferMode,
+        });
+      }
+
+      setTransferModalOpen(false);
+      setTransferAddress("");
+      setTransferAmount("");
+    } catch (e) {
+      setLocalActionError(e instanceof Error ? e.message : "Transfer failed.");
+    } finally {
+      setIsTransferring(false);
+    }
+  }
+
+  async function handleShield() {
+    setIsShielding(true);
+    setLocalActionError(null);
+    setActionError(null);
+    try {
+      if (!canUseUmbraActions) {
+        throw new Error("Complete Umbra registration and ensure wallet is synced before shielding.");
+      }
+      if (activeTab === "public") {
+        await shieldFromPublic(shieldCurrency as "USDC" | "USDT" | "SOL", shieldAmount);
+      } else {
+        await unshieldToPublic(shieldCurrency as "USDC" | "USDT" | "SOL", shieldAmount);
+      }
+
+      setShieldModalOpen(false);
+      setShieldAmount("");
+    } catch (e) {
+      setLocalActionError(e instanceof Error ? e.message : "Shield action failed.");
+    } finally {
+      setIsShielding(false);
+    }
   }
 
   const mask = (val: string) => (showAmounts ? val : "••••••");
@@ -155,6 +361,32 @@ export function BalanceCard() {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
+
+  const currentTransferBalance = balances.find((b) => b.currency === transferCurrency)?.amount || 0;
+  const transferAmountNum = parseFloat(transferAmount) || 0;
+  const transferError = transferAmountNum > currentTransferBalance ? "Amount exceeds available balance" : "";
+
+  const currentShieldBalance = balances.find((b) => b.currency === shieldCurrency)?.amount || 0;
+  const shieldAmountNum = parseFloat(shieldAmount) || 0;
+  const shieldError = shieldAmountNum > currentShieldBalance ? "Amount exceeds available balance" : "";
+
+  const handleCloseTransferModal = () => {
+    setTransferModalOpen(false);
+    setLocalActionError(null);
+    setActionError(null);
+  };
+
+  const handleCloseShieldModal = () => {
+    setShieldModalOpen(false);
+    setLocalActionError(null);
+    setActionError(null);
+  };
+
+  const handleCloseUtxoModal = () => {
+    setUtxoModalOpen(false);
+    setLocalActionError(null);
+    setActionError(null);
+  };
 
   return (
     <div className={`balance-card balance-card--${activeTab}`}>
@@ -250,49 +482,78 @@ export function BalanceCard() {
         ))}
       </div>
 
-      {activeTab === "private" && (
-        <div className="balance-card__private-stats" aria-label="Private balance details">
-          {privateStats.map((stat) => {
-            const Icon = stat.icon;
-            if (stat.action) {
-              return (
-                <button
-                  className="balance-card__micro balance-card__micro--button"
-                  key={stat.label}
-                  onClick={() => setUtxoModalOpen(true)}
-                  type="button"
-                >
-                  <Icon size={15} aria-hidden="true" />
-                  <span>
-                    <strong>{stat.value}</strong>
-                    <small>{stat.label}</small>
-                  </span>
-                  <em>{stat.detail}</em>
-                </button>
-              );
-            }
+      <div className="balance-card__private-stats" aria-label={`${activeTab} balance details`}>
+        {(activeTab === "private" ? privateStats : publicStats).map((stat) => {
+          const Icon = stat.icon;
+          if (stat.action) {
+            let onClickHandler;
+            if (stat.label === "Unclaimed UTXOs") onClickHandler = () => setUtxoModalOpen(true);
+            else if (stat.label === "Send tokens" || stat.label === "Send UTXO") onClickHandler = () => setTransferModalOpen(true);
+            else if (stat.label === "Shield tokens" || stat.label === "UnShield tokens") onClickHandler = () => setShieldModalOpen(true);
 
             return (
-              <div className="balance-card__micro" key={stat.label}>
+              <button
+                className="balance-card__micro balance-card__micro--button"
+                key={stat.label}
+                onClick={onClickHandler}
+                type="button"
+              >
                 <Icon size={15} aria-hidden="true" />
                 <span>
-                  <strong>{stat.value}</strong>
+                  {stat.label === "Unclaimed UTXOs" && syncingClaimableUtxos ? (
+                    <strong style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <span style={{
+                        animation: "spin 0.7s linear infinite",
+                        border: "2px solid var(--balance-border)",
+                        borderTopColor: "var(--balance-ink)",
+                        borderRadius: "50%",
+                        display: "inline-block",
+                        height: "12px",
+                        width: "12px",
+                      }} />
+                      Scanning...
+                    </strong>
+                  ) : (
+                    <strong>{stat.value}</strong>
+                  )}
                   <small>{stat.label}</small>
                 </span>
-                <em>{stat.detail}</em>
-              </div>
+                <em>{stat.label === "Unclaimed UTXOs" && syncingClaimableUtxos ? "Please wait" : stat.detail}</em>
+              </button>
             );
-          })}
-        </div>
-      )}
+          }
 
-      <DModal open={utxoModalOpen} onClose={() => setUtxoModalOpen(false)} title="Unclaimed UTXOs" wide>
+          return (
+            <div className="balance-card__micro" key={stat.label}>
+              <Icon size={15} aria-hidden="true" />
+              <span>
+                <strong>{stat.value}</strong>
+                <small>{stat.label}</small>
+              </span>
+              <em>{stat.detail}</em>
+            </div>
+          );
+        })}
+      </div>
+      {(actionError || localActionError) && activeTab === "private" ? (
+        <div className="dash-umbra-modal__error" style={{ margin: "8px 22px 0" }}>
+          {localActionError ?? actionError}
+        </div>
+      ) : null}
+      {/* {syncingPrivateBalances && activeTab === "private" ? (
+        <div style={{ margin: "8px 22px 0", fontSize: 12, color: "var(--color-text-muted)" }}>
+          Syncing private balances...
+        </div>
+      ) : null} */}
+
+      <DModal open={utxoModalOpen} onClose={handleCloseUtxoModal} title="Unclaimed UTXOs" wide>
         <div className="balance-card__modal-summary">
           <div>
             <span>Claimable value</span>
             <strong>{mask(formatCurrency(claimableTotal, "USDC"))}</strong>
           </div>
           <DButton
+            className="balance-card__claim-all-btn"
             disabled={claimableUtxos.length === 0 || claimingId !== null}
             icon={ArrowDownToLine}
             loading={claimingId === "all"}
@@ -304,7 +565,7 @@ export function BalanceCard() {
           </DButton>
         </div>
 
-        {claimableUtxos.length === 0 ? (
+        {pendingUtxos.length === 0 ? (
           <div className="balance-card__utxo-empty">
             <ShieldCheck size={24} aria-hidden="true" />
             <span>All UTXOs claimed</span>
@@ -312,7 +573,7 @@ export function BalanceCard() {
           </div>
         ) : (
           <div className="balance-card__utxo-list">
-            {claimableUtxos.map((u) => (
+            {pendingUtxos.map((u) => (
               <div className="balance-card__utxo-row" key={u.id}>
                 <div className="balance-card__utxo-left">
                   <div className="balance-card__utxo-amount">
@@ -326,19 +587,164 @@ export function BalanceCard() {
                     <span><Clock size={11} aria-hidden="true" /> {u.age}</span>
                   </div>
                 </div>
-                <DButton
-                  disabled={claimingId !== null}
-                  loading={claimingId === u.id}
-                  onClick={() => handleClaim(u.id)}
-                  size="sm"
-                  variant="secondary"
+                <div
+                  className="balance-card__utxo-actions balance-card__tooltip-wrapper"
+                  data-tooltip="Claims this UTXO into your encrypted private balance."
+                  style={{ display: "flex", gap: "8px" }}
                 >
-                  Claim
-                </DButton>
+                  <DButton
+                    disabled={
+                      u.status === "claimed" ||
+                      u.status === "claiming" ||
+                      (claimingId !== null && claimingId !== u.id)
+                    }
+                    loading={u.status === "claiming"}
+                    onClick={() => handleClaim(u.id)}
+                    size="sm"
+                    variant={u.status === "claimed" ? "secondary" : "primary"}
+                  >
+                    {u.status === "claiming" ? "Claiming..." : u.status === "claimed" ? "Claimed ✓" : "Claim to private"}
+                  </DButton>
+                </div>
               </div>
             ))}
           </div>
         )}
+      </DModal>
+
+      <DModal open={transferModalOpen} onClose={handleCloseTransferModal} title="Transfer Tokens">
+        <div style={{ display: "flex", flexDirection: "column", gap: 16, marginTop: 8 }}>
+          <DSelect
+            label="Transfer type"
+            value={activeTab === "public" ? publicTransferMode : privateTransferMode}
+            onChange={(val) => {
+              if (activeTab === "public") setPublicTransferMode(val as "normal" | "utxo");
+              else setPrivateTransferMode(val as "encrypted" | "utxo");
+            }}
+            options={
+              activeTab === "public"
+                ? [
+                  { value: "normal", label: "Normal (visible SPL / SOL transfer)" },
+                  { value: "utxo", label: "Send privately (receiver claims UTXO)" },
+                ]
+                : [
+                  {
+                    value: "encrypted",
+                    label: "Confidential (encrypted balance → encrypted balance)",
+                  },
+                  {
+                    value: "utxo",
+                    label: "Send privately from shielded balance (receiver claims UTXO)",
+                  },
+                ]
+            }
+          />
+          {activeTab === "private" && privateTransferMode === "encrypted" ? (
+            <p style={{ fontSize: 12, color: "var(--color-text-muted)", margin: 0 }}>
+              ETA→ETA transfers are not available in the bundled Umbra SDK yet. Choose “receiver claims UTXO” or you’ll
+              see an error when sending.
+            </p>
+          ) : null}
+          {activeTab === "public" && publicTransferMode === "utxo" ? (
+            <p style={{ fontSize: 12, color: "var(--color-text-muted)", margin: 0 }}>
+              Requires Umbra registration. USDC/USDT only — sends through the mixer as a receiver-claimable UTXO.
+            </p>
+          ) : null}
+          <DInput
+            label="Destination Address"
+            placeholder="Solana address or .sol domain"
+            value={transferAddress}
+            onChange={setTransferAddress}
+          />
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 120px", gap: 12 }}>
+            <DInput
+              label="Amount"
+              placeholder="0.00"
+              value={transferAmount}
+              onChange={setTransferAmount}
+              type="number"
+            />
+            <DSelect
+              label="Asset"
+              value={transferCurrency}
+              onChange={setTransferCurrency}
+              options={
+                activeTab === "public" && publicTransferMode === "utxo"
+                  ? [
+                    { value: "USDC", label: "USDC" },
+                    { value: "USDT", label: "USDT" },
+                  ]
+                  : [
+                    { value: "USDC", label: "USDC" },
+                    { value: "USDT", label: "USDT" },
+                    { value: "SOL", label: "SOL" },
+                  ]
+              }
+            />
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, color: "var(--color-text-muted)" }}>
+            <span>Available: {currentTransferBalance.toLocaleString("en-US", { maximumFractionDigits: 4 })} {transferCurrency}</span>
+          </div>
+          {transferError && <div className="dash-umbra-modal__error" style={{ marginTop: 0 }}>{transferError}</div>}
+          {(actionError || localActionError) && (
+            <div className="dash-umbra-modal__error" style={{ marginTop: 0 }}>
+              {localActionError ?? actionError}
+            </div>
+          )}
+          <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}>
+            <DButton
+              disabled={isTransferring || !transferAddress || !transferAmount || !!transferError}
+              loading={isTransferring}
+              onClick={handleTransfer}
+              variant="primary"
+            >
+              Send {transferCurrency}
+            </DButton>
+          </div>
+        </div>
+      </DModal>
+
+      <DModal open={shieldModalOpen} onClose={handleCloseShieldModal} title={activeTab === "public" ? "Shield Tokens" : "UnShield Tokens"}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 16, marginTop: 8 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 120px", gap: 12 }}>
+            <DInput
+              label="Amount"
+              placeholder="0.00"
+              value={shieldAmount}
+              onChange={setShieldAmount}
+              type="number"
+            />
+            <DSelect
+              label="Asset"
+              value={shieldCurrency}
+              onChange={setShieldCurrency}
+              options={[
+                { value: "USDC", label: "USDC" },
+                { value: "USDT", label: "USDT" },
+                { value: "SOL", label: "SOL" }
+              ]}
+            />
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, color: "var(--color-text-muted)" }}>
+            <span>Available: {currentShieldBalance.toLocaleString("en-US", { maximumFractionDigits: 4 })} {shieldCurrency}</span>
+          </div>
+          {shieldError && <div className="dash-umbra-modal__error" style={{ marginTop: 0 }}>{shieldError}</div>}
+          {(actionError || localActionError) && (
+            <div className="dash-umbra-modal__error" style={{ marginTop: 0 }}>
+              {localActionError ?? actionError}
+            </div>
+          )}
+          <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}>
+            <DButton
+              disabled={isShielding || !shieldAmount || !!shieldError}
+              loading={isShielding}
+              onClick={handleShield}
+              variant="primary"
+            >
+              {activeTab === "public" ? "Shield" : "UnShield"} {shieldCurrency}
+            </DButton>
+          </div>
+        </div>
       </DModal>
 
       <style>{balanceCardCSS}</style>
@@ -607,7 +1013,7 @@ const balanceCardCSS = `
 .balance-card__tokens {
   display: grid;
   gap: 8px;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   padding: 0 18px 12px;
 }
 
@@ -617,15 +1023,28 @@ const balanceCardCSS = `
   border: 1px solid var(--balance-border);
   border-radius: 13px;
   display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
   justify-content: space-between;
+  padding: 10px 12px;
   min-width: 0;
-  padding: 8px 10px;
+  transition: all 0.2s cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+.balance-card__token-row:hover {
+  background: var(--balance-surface);
+  border-color: var(--balance-border-soft);
+  transform: translateY(-1px);
 }
 
 .balance-card__token-left {
   align-items: center;
   display: flex;
-  gap: 8px;
+  gap: 10px;
+  min-width: 0;
+}
+
+.balance-card__token-left > div {
   min-width: 0;
 }
 
@@ -634,7 +1053,6 @@ const balanceCardCSS = `
   border-radius: 50%;
   color: #fff;
   display: flex;
-  flex-shrink: 0;
   font-size: 12px;
   font-weight: 800;
   height: 26px;
@@ -644,6 +1062,7 @@ const balanceCardCSS = `
 
 .balance-card__token-icon--sol { background: linear-gradient(135deg, #9945ff, #14f195); }
 .balance-card__token-icon--usdc { background: linear-gradient(135deg, #2775ca, #69a7ff); }
+.balance-card__token-icon--usdt { background: linear-gradient(135deg, #26a17b, #50c878); }
 
 .balance-card__token-name {
   color: var(--balance-ink);
@@ -839,6 +1258,35 @@ const balanceCardCSS = `
 
 .balance-card__utxo-empty small {
   font-size: 12px;
+}
+
+.balance-card__claim-all-btn,
+.balance-card__claim-all-btn span {
+  color: #ffffff !important;
+}
+
+.balance-card__tooltip-wrapper {
+  position: relative;
+}
+
+.balance-card__tooltip-wrapper:hover::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: 0;
+  background: var(--color-bg-card);
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-violet-border, rgba(168, 85, 247, 0.2));
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: normal;
+  width: 220px;
+  text-align: right;
+  z-index: 100;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  pointer-events: none;
 }
 
 @media (hover: hover) {

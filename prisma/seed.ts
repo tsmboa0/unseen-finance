@@ -1,13 +1,7 @@
-// dotenv loads .env so DATABASE_URL is available outside Next.js
-import "dotenv/config";
+import "../lib/env";
 
-import { PrismaClient } from "@prisma/client";
-import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
 import { generateApiKey, generateWebhookSecret } from "../lib/utils";
-
-const url = process.env.DATABASE_URL ?? "file:./dev.db";
-const adapter = new PrismaBetterSqlite3({ url });
-const prisma = new PrismaClient({ adapter } as never);
+import prisma from "../lib/db";
 
 async function main() {
   const devApiKey =
