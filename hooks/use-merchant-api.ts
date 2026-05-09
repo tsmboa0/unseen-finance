@@ -2,7 +2,6 @@
 
 import { usePrivy } from "@privy-io/react-auth";
 import { useState, useEffect, useCallback, useRef } from "react";
-import { useRouter } from "next/navigation";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -36,7 +35,6 @@ export type MerchantProfile = {
 
 export function useMerchantApi() {
   const { getAccessToken, authenticated } = usePrivy();
-  const router = useRouter();
   const [merchant, setMerchant] = useState<MerchantProfile | null>(null);
   const [isNewUser, setIsNewUser] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -45,7 +43,9 @@ export function useMerchantApi() {
   const fetchMerchantProfile = useCallback(async (): Promise<MerchantProfile | null> => {
     const privyToken = await getAccessToken();
     if (!privyToken) {
-      router.replace("/");
+      // Token unavailable — don't redirect; DashboardShell handles auth redirects
+      // via Privy's authenticated state. Just return null and show empty state.
+      setLoading(false);
       return null;
     }
 
@@ -54,9 +54,9 @@ export function useMerchantApi() {
     });
 
     if (!res.ok) {
-      if (res.status === 401 || res.status === 403) {
-        router.replace("/");
-      }
+      // Don't redirect on API errors — the DashboardShell is the single source
+      // of truth for auth redirects. A 401 here is likely a transient issue
+      // (e.g. missing env var on the server) and should not bounce the user.
       return null;
     }
 
@@ -73,7 +73,7 @@ export function useMerchantApi() {
     setMerchant(data as MerchantProfile);
     apiKeyRef.current = (data as MerchantProfile).apiKey;
     return data as MerchantProfile;
-  }, [getAccessToken, router]);
+  }, [getAccessToken]);
 
   // Fetch merchant profile (runs once on mount / auth change)
   useEffect(() => {
@@ -112,8 +112,7 @@ export function useMerchantApi() {
     ) => {
       const privyToken = await getAccessToken();
       if (!privyToken) {
-        router.replace("/");
-        throw new Error("Session expired. Redirecting to landing page.");
+        throw new Error("Session expired. Please refresh the page.");
       }
 
       const res = await fetch("/api/dashboard/me", {
@@ -127,8 +126,7 @@ export function useMerchantApi() {
 
       if (!res.ok) {
         if (res.status === 401 || res.status === 403) {
-          router.replace("/");
-          throw new Error("Session expired. Redirecting to landing page.");
+          throw new Error("Session expired. Please refresh the page.");
         }
         const body = (await res.json().catch(() => null)) as { error?: string } | null;
         throw new Error(body?.error ?? "Unable to update merchant");
@@ -139,7 +137,7 @@ export function useMerchantApi() {
       apiKeyRef.current = updated.apiKey;
       return updated;
     },
-    [getAccessToken, router],
+    [getAccessToken],
   );
 
   // Convenience fetcher that auto-injects the merchant's API key
@@ -156,11 +154,7 @@ export function useMerchantApi() {
             const data = (await res.json()) as MerchantProfile;
             apiKeyRef.current = data.apiKey;
             setMerchant(data);
-          } else if (res.status === 401 || res.status === 403) {
-            router.replace("/");
           }
-        } else {
-          router.replace("/");
         }
       }
 
@@ -175,7 +169,7 @@ export function useMerchantApi() {
 
       return fetch(path, { ...init, headers });
     },
-    [getAccessToken, router]
+    [getAccessToken]
   );
 
   return { merchant, isNewUser, loading, apiFetch, refreshMerchant: fetchMerchantProfile, updateMerchant };

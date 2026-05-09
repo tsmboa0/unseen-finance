@@ -383,6 +383,16 @@ export function LandingPage() {
   const [activeRow, setActiveRow] = useState<number>(-1);
   const { login, ready, authenticated } = usePrivy();
   const router = useRouter();
+  const pendingRedirect = useRef(false);
+
+  // Redirect to dashboard once login completes — only when the user
+  // explicitly called login() in this session, not on every page visit.
+  useEffect(() => {
+    if (ready && authenticated && pendingRedirect.current) {
+      pendingRedirect.current = false;
+      router.replace("/dashboard");
+    }
+  }, [ready, authenticated, router]);
 
   useEffect(() => {
     const timers = [
@@ -858,6 +868,7 @@ export function LandingPage() {
                   if (ready && authenticated) {
                     router.push("/dashboard");
                   } else {
+                    pendingRedirect.current = true;
                     login();
                   }
                 }}

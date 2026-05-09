@@ -219,6 +219,16 @@ function Navbar({ stage }: { stage: number }) {
   const reducedMotion = useReducedMotion();
   const { login, ready, authenticated } = usePrivy();
   const router = useRouter();
+  const pendingRedirect = useRef(false);
+
+  // Redirect to dashboard once login completes — only when the user
+  // explicitly called login() in this session, not on every page visit.
+  useEffect(() => {
+    if (ready && authenticated && pendingRedirect.current) {
+      pendingRedirect.current = false;
+      router.replace("/dashboard");
+    }
+  }, [ready, authenticated, router]);
 
   const openDashboardOrLogin = () => {
     if (ready && authenticated) {
@@ -226,6 +236,7 @@ function Navbar({ stage }: { stage: number }) {
       return;
     }
 
+    pendingRedirect.current = true;
     login();
   };
 
