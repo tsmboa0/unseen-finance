@@ -1,0 +1,456 @@
+/* Redeem page — Unseen brand + wallet-adapter UI overrides */
+
+.redeem-root {
+  min-height: 100vh;
+  font-family: var(--font-body);
+  background: var(--color-bg);
+  color: var(--color-text-primary);
+  position: relative;
+  overflow-x: hidden;
+}
+
+.redeem-aurora {
+  pointer-events: none;
+  position: fixed;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 80% 50% at 50% -20%, rgba(123, 47, 255, 0.35), transparent 55%),
+    radial-gradient(ellipse 60% 40% at 100% 40%, rgba(168, 85, 247, 0.18), transparent 45%),
+    radial-gradient(ellipse 50% 35% at 0% 70%, rgba(74, 26, 140, 0.2), transparent 50%),
+    var(--color-bg);
+  z-index: 0;
+}
+
+.redeem-header {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 20;
+  padding: 16px 20px;
+  display: flex;
+  align-items: center;
+}
+
+.redeem-header .unseen-logo {
+  filter: drop-shadow(0 2px 12px rgba(123, 47, 255, 0.25));
+}
+
+.redeem-inner {
+  position: relative;
+  z-index: 1;
+  max-width: 460px;
+  margin: 0 auto;
+  padding: 76px 20px 56px;
+}
+
+.redeem-hero-icon {
+  width: 72px;
+  height: 72px;
+  margin: 0 auto 20px;
+  border-radius: 20px;
+  display: grid;
+  place-items: center;
+  background: var(--gradient-gift);
+  box-shadow: var(--shadow-violet), 0 12px 40px rgba(0, 0, 0, 0.25);
+  color: #fff;
+}
+
+.redeem-title {
+  font-family: var(--font-display);
+  font-size: clamp(1.75rem, 5vw, 2.125rem);
+  font-weight: 800;
+  text-align: center;
+  margin: 0 0 10px;
+  letter-spacing: -0.03em;
+  background: var(--gradient-hero-text);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.redeem-sub {
+  text-align: center;
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--color-text-secondary);
+  margin: 0 auto 28px;
+  max-width: 38ch;
+}
+
+.redeem-card {
+  background: var(--color-bg-card);
+  border-radius: var(--radius-card);
+  padding: 28px 24px;
+  box-shadow: var(--shadow-card);
+  border: 1px solid var(--color-violet-border);
+}
+
+.redeem-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-secondary);
+  margin-bottom: 10px;
+}
+
+.redeem-input {
+  width: 100%;
+  padding: 14px 16px;
+  border-radius: var(--radius-button);
+  border: 1px solid var(--color-violet-border);
+  background: var(--color-bg-card-hover);
+  color: var(--color-text-primary);
+  font-size: 16px;
+  font-family: var(--font-mono);
+  margin-bottom: 14px;
+  transition: border-color var(--duration-base) var(--ease-out-expo), box-shadow var(--duration-base);
+}
+
+.redeem-input:focus {
+  outline: none;
+  border-color: var(--color-violet-border-hover);
+  box-shadow: 0 0 0 3px var(--color-violet-shimmer);
+}
+
+.redeem-input::placeholder {
+  color: var(--color-text-muted);
+}
+
+.redeem-btn {
+  width: 100%;
+  padding: 14px 20px;
+  border-radius: var(--radius-button);
+  border: none;
+  font-weight: 700;
+  font-size: 15px;
+  font-family: var(--font-display);
+  cursor: pointer;
+  transition:
+    transform var(--duration-fast) var(--ease-out-expo),
+    box-shadow var(--duration-base),
+    filter var(--duration-fast);
+}
+
+.redeem-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.redeem-btn--primary {
+  background: var(--gradient-violet);
+  color: #fff;
+  box-shadow: 0 4px 24px rgba(123, 47, 255, 0.4);
+}
+
+.redeem-btn--primary:not(:disabled):hover {
+  filter: brightness(1.08);
+  box-shadow: 0 6px 32px rgba(123, 47, 255, 0.5);
+  transform: translateY(-1px);
+}
+
+.redeem-btn--secondary {
+  background: var(--color-bg-card-hover);
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-violet-border);
+}
+
+.redeem-btn--secondary:not(:disabled):hover {
+  border-color: var(--color-violet-border-hover);
+  background: var(--color-bg-card);
+}
+
+.redeem-claim-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.redeem-btn--claim {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+
+@keyframes redeem-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.redeem-btn-spinner {
+  flex-shrink: 0;
+  animation: redeem-spin 0.85s linear infinite;
+}
+
+.redeem-claim-countdown {
+  flex-shrink: 0;
+  min-width: 2.75rem;
+  font-family: var(--font-mono);
+  font-size: 15px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-secondary);
+  text-align: right;
+}
+
+.redeem-gift-panel {
+  margin-top: 24px;
+  padding: 24px 20px;
+  border-radius: var(--radius-card);
+  background: linear-gradient(155deg, rgba(123, 47, 255, 0.16) 0%, rgba(168, 85, 247, 0.06) 50%, rgba(13, 9, 32, 0.5) 100%);
+  border: 1px solid var(--color-violet-border-hover);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.redeem-gift-eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-violet-glow);
+  margin: 0 0 12px;
+}
+
+.redeem-amount {
+  font-family: var(--font-display);
+  font-size: clamp(2rem, 8vw, 2.75rem);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  margin: 0 0 20px;
+  color: var(--color-text-primary);
+}
+
+.redeem-memo-wrap {
+  position: relative;
+  padding: 20px 22px 22px;
+  margin: 0 0 16px;
+  border-radius: 16px;
+  background: rgba(8, 5, 16, 0.35);
+  border-left: 4px solid var(--color-violet-primary);
+}
+
+[data-theme="light"] .redeem-memo-wrap {
+  background: rgba(255, 255, 255, 0.55);
+  border-left-color: var(--color-violet-primary);
+}
+
+.redeem-memo-quote {
+  position: absolute;
+  top: 8px;
+  left: 14px;
+  font-size: 3rem;
+  line-height: 1;
+  font-family: Georgia, serif;
+  color: var(--color-violet-primary);
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+.redeem-memo-text {
+  position: relative;
+  z-index: 1;
+  font-family: var(--font-display);
+  font-size: 1.2rem;
+  font-weight: 600;
+  line-height: 1.5;
+  color: var(--color-text-primary);
+}
+
+.redeem-expiry {
+  font-size: 13px;
+  color: var(--color-text-muted);
+  margin: 0;
+}
+
+.redeem-wallet-row {
+  margin-top: 26px;
+  padding-top: 22px;
+  border-top: 1px solid var(--color-line-soft);
+}
+
+.redeem-wallet-hint {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  margin: 0 0 12px;
+  line-height: 1.45;
+}
+
+.redeem-network-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 6px 12px;
+  border-radius: var(--radius-pill);
+  background: var(--color-violet-shimmer);
+  border: 1px solid var(--color-violet-border);
+  color: var(--color-text-secondary);
+  margin-bottom: 14px;
+}
+
+.redeem-footer {
+  text-align: center;
+  margin-top: 28px;
+  font-size: 13px;
+  color: var(--color-text-muted);
+}
+
+.redeem-footer a {
+  color: var(--color-violet-primary);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.redeem-footer a:hover {
+  text-decoration: underline;
+}
+
+.redeem-err {
+  color: var(--color-terminal-red);
+  font-size: 14px;
+  margin: 0 0 12px;
+  line-height: 1.45;
+}
+
+.redeem-success {
+  margin-top: 14px;
+  padding: 14px 16px;
+  border-radius: var(--radius-button);
+  background: var(--color-success-soft);
+  border: 1px solid rgba(125, 247, 197, 0.35);
+  font-size: 14px;
+  color: var(--color-success);
+  line-height: 1.5;
+  word-break: break-all;
+}
+
+.redeem-root--success .redeem-footer {
+  margin-top: auto;
+  padding-bottom: 24px;
+}
+
+.redeem-inner--success {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding-top: 40px;
+  padding-bottom: 40px;
+  max-width: 420px;
+}
+
+.redeem-success-icon-wrap {
+  margin-bottom: 28px;
+  filter: drop-shadow(0 8px 28px rgba(125, 247, 197, 0.35));
+}
+
+.redeem-success-check {
+  color: var(--color-success, #22c55e);
+  display: block;
+}
+
+[data-theme="light"] .redeem-success-check {
+  color: #16a34a;
+}
+
+.redeem-success-title {
+  font-family: var(--font-display);
+  font-size: clamp(1.85rem, 6vw, 2.25rem);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  margin: 0 0 14px;
+  color: var(--color-text-primary);
+}
+
+.redeem-success-body {
+  font-size: 16px;
+  line-height: 1.55;
+  color: var(--color-text-secondary);
+  margin: 0 0 32px;
+  max-width: 34ch;
+}
+
+.redeem-success-body strong {
+  color: var(--color-text-primary);
+  font-weight: 700;
+}
+
+.redeem-success-actions {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.redeem-root--success {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.redeem-root--success > .redeem-inner--success {
+  flex: 1;
+}
+
+.redeem-root .wallet-adapter-dropdown,
+.redeem-root .wallet-adapter-button {
+  width: 100% !important;
+  justify-content: center !important;
+  border-radius: var(--radius-button) !important;
+  font-family: var(--font-display) !important;
+  font-weight: 700 !important;
+  font-size: 15px !important;
+  transition:
+    transform var(--duration-fast) var(--ease-out-expo),
+    box-shadow var(--duration-base),
+    filter var(--duration-fast) !important;
+}
+
+.redeem-root .wallet-adapter-button-trigger {
+  background: var(--gradient-violet) !important;
+  color: #fff !important;
+  border: none !important;
+  padding: 14px 20px !important;
+  box-shadow: 0 4px 24px rgba(123, 47, 255, 0.4) !important;
+}
+
+.redeem-root .wallet-adapter-button-trigger:not([disabled]):hover {
+  filter: brightness(1.08) !important;
+  transform: translateY(-1px);
+}
+
+.redeem-root .wallet-adapter-modal-wrapper {
+  background: var(--color-overlay) !important;
+}
+
+.redeem-root .wallet-adapter-modal {
+  background: var(--color-bg-card) !important;
+  border: 1px solid var(--color-violet-border) !important;
+  border-radius: var(--radius-card) !important;
+  box-shadow: var(--shadow-card) !important;
+}
+
+.redeem-root .wallet-adapter-modal-title {
+  color: var(--color-text-primary) !important;
+  font-family: var(--font-display) !important;
+}
+
+.redeem-root .wallet-adapter-modal-list .wallet-adapter-button {
+  background: var(--color-bg-card-hover) !important;
+  color: var(--color-text-primary) !important;
+  border: 1px solid var(--color-violet-border) !important;
+}
+
+.redeem-root .wallet-adapter-modal-list .wallet-adapter-button:hover {
+  border-color: var(--color-violet-border-hover) !important;
+}

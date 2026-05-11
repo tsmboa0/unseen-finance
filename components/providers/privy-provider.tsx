@@ -27,7 +27,7 @@ export function PrivyClientProvider({ children }: { children: ReactNode }) {
         appearance: {
           theme: "light",
           accentColor: "#7b2fff",
-          logo: "https://unseen.finance/logo.png",
+          logo: "https://unseen.finance/unseen-logo-dark.png",
         },
         embeddedWallets: {
           solana: {

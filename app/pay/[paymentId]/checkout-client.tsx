@@ -24,6 +24,7 @@ import {
 import type { WalletAccount } from "@wallet-standard/base";
 import { createUmbraLocalMasterSeedStorage } from "@/lib/umbra/master-seed-storage";
 import { getDefaultSolanaEndpoints, getDefaultUmbraIndexerUrl } from "@/lib/solana-endpoints";
+import { UNSEEN_LOGO_DARK_SRC } from "@/components/unseen/logo";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -42,7 +43,7 @@ type PaymentData = {
   expiresAt: string;
 };
 
-type Step = "connecting" | "ready" | "signing" | "submitting" | "success" | "error";
+type Step = "connecting" | "ready" | "signing" | "submitting" | "confirming" | "success" | "error";
 
 type ConnectedWalletState = {
   wallet: WalletWithSolanaFeatures;
@@ -53,11 +54,23 @@ type MutableFeatureMap = Record<string, unknown>;
 
 // ─── Component ──────────────────────────────────────────────────────────────
 
-export default function CheckoutClient({ payment }: { payment: PaymentData }) {
-  return <CheckoutContent payment={payment} />;
+export default function CheckoutClient({
+  payment,
+  checkoutKind,
+}: {
+  payment: PaymentData;
+  checkoutKind: "hosted" | "invoice";
+}) {
+  return <CheckoutContent payment={payment} checkoutKind={checkoutKind} />;
 }
 
-function CheckoutContent({ payment }: { payment: PaymentData }) {
+function CheckoutContent({
+  payment,
+  checkoutKind,
+}: {
+  payment: PaymentData;
+  checkoutKind: "hosted" | "invoice";
+}) {
   const [step, setStep] = useState<Step>("connecting");
   const [errorMsg, setErrorMsg] = useState("");
   const [txSignatures, setTxSignatures] = useState<string[]>([]);
@@ -405,6 +418,16 @@ function CheckoutContent({ payment }: { payment: PaymentData }) {
         throw new Error((data as { error?: string }).error ?? "Failed to submit transaction");
       }
 
+      if (checkoutKind === "invoice") {
+        setStep("confirming");
+        const verified = await pollHostedPaymentConfirmation(payment.id, payment.paymentToken);
+        if (!verified.ok) {
+          setErrorMsg(verified.error);
+          setStep("error");
+          return;
+        }
+      }
+
       setTxSignatures(signatures);
       setStep("success");
     } catch (err) {
@@ -418,7 +441,7 @@ function CheckoutContent({ payment }: { payment: PaymentData }) {
       setErrorMsg(msg);
       setStep("error");
     }
-  }, [walletAddress, payment]);
+  }, [walletAddress, payment, checkoutKind]);
 
   const handlePayClick = useCallback(() => {
     void executePayment();
@@ -432,11 +455,11 @@ function CheckoutContent({ payment }: { payment: PaymentData }) {
 
       {/* Logo */}
       <div className="checkout-logo">
-        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="url(#cg)" strokeWidth="2.5">
-          <defs><linearGradient id="cg" x1="0" y1="0" x2="24" y2="24"><stop offset="0%" stopColor="#7b2fff"/><stop offset="100%" stopColor="#a855f7"/></linearGradient></defs>
-          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-        </svg>
-        <span className="checkout-logo-text">unseen<span style={{ fontWeight: 400, opacity: 0.5 }}> pay</span></span>
+        <img
+          src={UNSEEN_LOGO_DARK_SRC}
+          alt="Unseen Pay"
+          className="checkout-logo-img"
+        />
       </div>
 
       {/* Card */}
@@ -475,9 +498,7 @@ function CheckoutContent({ payment }: { payment: PaymentData }) {
               </span>
             </div>
             <button className="checkout-pay-btn" onClick={handlePayClick}>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-              </svg>
+              <img src={UNSEEN_LOGO_DARK_SRC} alt="" className="checkout-btn-logo checkout-btn-logo--md" />
               Pay Privately
             </button>
             {/* <p className="checkout-hint">
@@ -502,6 +523,14 @@ function CheckoutContent({ payment }: { payment: PaymentData }) {
           </div>
         )}
 
+        {step === "confirming" && (
+          <div className="checkout-step">
+            <div className="checkout-spinner" />
+            <p className="checkout-step-text">Confirming payment...</p>
+            <p className="checkout-hint">Almost done — finalizing on-chain.</p>
+          </div>
+        )}
+
         {step === "success" && (
           <div className="checkout-step">
             <div className="checkout-success-circle">
@@ -510,9 +539,15 @@ function CheckoutContent({ payment }: { payment: PaymentData }) {
               </svg>
             </div>
             <p className="checkout-step-text" style={{ color: "#16a34a" }}>Payment Sent!</p>
-            <p className="checkout-hint">
-              Return to the merchant&apos;s page and click &quot;I have paid&quot; to complete your order.
-            </p>
+            {checkoutKind === "invoice" ? (
+              <p className="checkout-hint">
+                Your invoice is paid. You can close this page — the merchant&apos;s dashboard updates automatically.
+              </p>
+            ) : (
+              <p className="checkout-hint">
+                Return to the merchant&apos;s page and click &quot;I have paid&quot; to complete your order.
+              </p>
+            )}
             {txSignatures.length > 0 && (
               <code className="checkout-sig">{truncateAddress(txSignatures[0])}</code>
             )}
@@ -544,16 +579,17 @@ function CheckoutContent({ payment }: { payment: PaymentData }) {
 
         {/* Privacy badge */}
         <div className="checkout-privacy-badge">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-          </svg>
+          <img src={UNSEEN_LOGO_DARK_SRC} alt="" className="checkout-privacy-logo" />
           Payment is private — shielded by Unseen Pay
         </div>
 
         {/* Footer */}
         <div className="checkout-footer">
           <span className="checkout-timer">⏱ {countdown}</span>
-          <span className="checkout-powered">Powered by Unseen Finance</span>
+          <span className="checkout-powered">
+            Powered by
+            <img src={UNSEEN_LOGO_DARK_SRC} alt="Unseen Finance" className="checkout-footer-logo" />
+          </span>
         </div>
       </div>
 
@@ -561,15 +597,7 @@ function CheckoutContent({ payment }: { payment: PaymentData }) {
         <div className="checkout-consent-modal-overlay">
           <div className="checkout-consent-modal" role="dialog" aria-modal="true" style={{ maxWidth: 380 }}>
             <div style={{ display: "flex", justifyContent: "center", marginBottom: 4 }}>
-              <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="url(#rg1)" strokeWidth="2">
-                <defs>
-                  <linearGradient id="rg1" x1="0" y1="0" x2="24" y2="24">
-                    <stop offset="0%" stopColor="#7b2fff"/>
-                    <stop offset="100%" stopColor="#a855f7"/>
-                  </linearGradient>
-                </defs>
-                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-              </svg>
+              <img src={UNSEEN_LOGO_DARK_SRC} alt="" className="checkout-modal-logo" />
             </div>
             <h3 className="checkout-consent-title">Enable private payments</h3>
             <p className="checkout-consent-text">
@@ -629,9 +657,7 @@ function CheckoutContent({ payment }: { payment: PaymentData }) {
                 "Retry registration"
               ) : (
                 <>
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-                  </svg>
+                  <img src={UNSEEN_LOGO_DARK_SRC} alt="" className="checkout-btn-logo checkout-btn-logo--sm" />
                   Register wallet
                 </>
               )}
@@ -644,10 +670,7 @@ function CheckoutContent({ payment }: { payment: PaymentData }) {
         <div className="checkout-consent-modal-overlay">
           <div className="checkout-consent-modal" role="dialog" aria-modal="true">
             <div style={{ display: "flex", justifyContent: "center", marginBottom: 4 }}>
-              <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="url(#ccg)" strokeWidth="2">
-                <defs><linearGradient id="ccg" x1="0" y1="0" x2="24" y2="24"><stop offset="0%" stopColor="#7b2fff"/><stop offset="100%" stopColor="#a855f7"/></linearGradient></defs>
-                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-              </svg>
+              <img src={UNSEEN_LOGO_DARK_SRC} alt="" className="checkout-modal-logo" />
             </div>
             <h3 className="checkout-consent-title">One-time setup</h3>
             <p className="checkout-consent-text">
@@ -670,9 +693,7 @@ function CheckoutContent({ payment }: { payment: PaymentData }) {
                 </>
               ) : (
                 <>
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-                  </svg>
+                  <img src={UNSEEN_LOGO_DARK_SRC} alt="" className="checkout-btn-logo checkout-btn-logo--sm" />
                   Sign to continue
                 </>
               )}
@@ -685,6 +706,45 @@ function CheckoutContent({ payment }: { payment: PaymentData }) {
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+/** After submit-tx, confirm on-chain via public verify (payment token auth). Polls until confirmed or timeout. */
+async function pollHostedPaymentConfirmation(
+  paymentId: string,
+  paymentToken: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const maxAttempts = 24;
+  const delayMs = 1500;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const res = await fetch(`/api/public/payments/${paymentId}/verify`, {
+      method: "POST",
+      headers: { "x-unseen-payment-token": paymentToken },
+    });
+    let body: { status?: string; error?: string } = {};
+    try {
+      body = (await res.json()) as { status?: string; error?: string };
+    } catch {
+      body = {};
+    }
+    if (res.ok && body.status === "confirmed") {
+      return { ok: true };
+    }
+    if (res.status === 401 || res.status === 404) {
+      return { ok: false, error: body.error ?? "Could not verify payment (session)." };
+    }
+    if (res.status === 422) {
+      return { ok: false, error: body.error ?? "Payment could not be verified." };
+    }
+    if (res.status === 409) {
+      return { ok: false, error: body.error ?? "This payment can no longer be confirmed." };
+    }
+    await new Promise((r) => setTimeout(r, delayMs));
+  }
+  return {
+    ok: false,
+    error:
+      "Your payment was sent but is still confirming on-chain. The merchant will see it soon — you can close this page.",
+  };
+}
 
 function formatTokenAmount(raw: string, decimals: number): string {
   const num = Number(raw) / Math.pow(10, decimals);
@@ -804,17 +864,56 @@ const animationCSS = `
   .checkout-logo {
     display: flex;
     align-items: center;
-    gap: 10px;
     margin-bottom: 32px;
     position: relative;
     z-index: 1;
   }
 
-  .checkout-logo-text {
-    font-size: 20px;
-    font-weight: 700;
-    color: #1a1030;
-    letter-spacing: -0.02em;
+  /* Logo sizes — adjust heights/max-widths to taste (shared hosted checkout) */
+  .checkout-logo-img {
+    height: 62px;
+    width: auto;
+    max-width: min(420px, 92vw);
+    object-fit: contain;
+    display: block;
+  }
+
+  .checkout-btn-logo {
+    width: auto;
+    object-fit: contain;
+    display: block;
+    flex-shrink: 0;
+  }
+
+  .checkout-btn-logo--md { height: 31px; max-width: 210px; }
+
+  .checkout-btn-logo--sm { height: 25px; max-width: 168px; }
+
+  .checkout-modal-logo {
+    height: 62px;
+    width: auto;
+    max-width: min(336px, 90vw);
+    object-fit: contain;
+    display: block;
+  }
+
+  .checkout-privacy-logo {
+    height: 25px;
+    width: auto;
+    max-width: 182px;
+    object-fit: contain;
+    display: block;
+    flex-shrink: 0;
+  }
+
+  .checkout-footer-logo {
+    height: 25px;
+    width: auto;
+    max-width: 210px;
+    margin-left: 6px;
+    object-fit: contain;
+    vertical-align: middle;
+    display: inline-block;
   }
 
   .checkout-merchant-label {
@@ -1031,6 +1130,8 @@ const animationCSS = `
   }
 
   .checkout-powered {
+    display: inline-flex;
+    align-items: center;
     font-size: 11px;
     color: #a090c0;
     font-weight: 500;

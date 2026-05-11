@@ -17,6 +17,11 @@ import { formatNumber } from "@/components/dashboard/formatters";
 import { Store, Plus, ExternalLink, Globe, ShieldCheck, Settings, ImageIcon } from "lucide-react";
 import { useMerchantApi } from "@/hooks/use-merchant-api";
 import { useRouter } from "next/navigation";
+import { getStorefrontBaseHost, getStorefrontHomeUrl, getStorefrontPublicLabel } from "@/lib/storefront-host";
+
+function revokeBlobUrl(url: string | null | undefined) {
+  if (url?.startsWith("blob:")) URL.revokeObjectURL(url);
+}
 
 const CATEGORY_OPTIONS = [
   { value: "Digital goods", label: "Digital goods" },
@@ -79,6 +84,7 @@ export default function StorefrontsPage() {
   const [formShielded, setFormShielded] = useState(true);
   const [formLogoUrl, setFormLogoUrl] = useState<string | null>(null);
   const [logoUploading, setLogoUploading] = useState(false);
+  const [logoUploadError, setLogoUploadError] = useState("");
   const logoInputRef = useRef<HTMLInputElement>(null);
 
   // ─── Fetch stores ──────────────────────────────────────────────────────────
@@ -125,22 +131,33 @@ export default function StorefrontsPage() {
   async function handleLogoUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
+    revokeBlobUrl(formLogoUrl);
+    const localPreview = URL.createObjectURL(file);
+    setFormLogoUrl(localPreview);
     setLogoUploading(true);
+    setLogoUploadError("");
     try {
       const fd = new FormData();
       fd.append("file", file);
       const res = await apiFetch("/api/v1/upload", { method: "POST", body: fd });
-      if (res.ok) {
-        const data = await res.json() as { url: string };
+      const data = (await res.json().catch(() => ({}))) as { url?: string; error?: string };
+      if (res.ok && data.url) {
+        revokeBlobUrl(localPreview);
         setFormLogoUrl(data.url);
+      } else {
+        setLogoUploadError(data.error ?? `Upload failed (${res.status})`);
       }
+    } catch {
+      setLogoUploadError("Upload failed — network error");
     } finally {
       setLogoUploading(false);
+      e.target.value = "";
     }
   }
 
   // ─── Create store ──────────────────────────────────────────────────────────
   function resetForm() {
+    revokeBlobUrl(formLogoUrl);
     setFormName("");
     setFormSlug("");
     setFormCategory("Digital goods");
@@ -149,9 +166,15 @@ export default function StorefrontsPage() {
     setFormShielded(true);
     setFormLogoUrl(null);
     setCreateError("");
+    setLogoUploadError("");
   }
 
   async function handleCreate() {
+    if (logoUploading) return;
+    if (formLogoUrl?.startsWith("blob:")) {
+      setCreateError("Fix the logo upload error before creating the store");
+      return;
+    }
     setCreating(true);
     setCreateError("");
     try {
@@ -236,7 +259,11 @@ export default function StorefrontsPage() {
                       </div>
                       <div className="sf-card__title-group">
                         <h3 className="sf-card__name">{sf.name}</h3>
-                        <span className="sf-card__subdomain">/{sf.slug}</span>
+                        <span className="sf-card__subdomain">
+                          {getStorefrontBaseHost()
+                            ? getStorefrontPublicLabel(sf.slug)
+                            : `/${sf.slug}`}
+                        </span>
                       </div>
                     </div>
                     <div className="sf-card__badges">
@@ -273,7 +300,7 @@ export default function StorefrontsPage() {
                       variant="ghost"
                       icon={ExternalLink}
                       size="sm"
-                      onClick={() => window.open(`/store/${sf.slug}`, "_blank")}
+                      onClick={() => window.open(getStorefrontHomeUrl(sf.slug), "_blank")}
                     >
                       Visit
                     </DButton>
@@ -333,6 +360,9 @@ export default function StorefrontsPage() {
                 </p>
               </div>
             </div>
+            {logoUploadError ? (
+              <p style={{ color: "#ef4444", fontSize: 12, margin: 0, lineHeight: 1.4 }}>{logoUploadError}</p>
+            ) : null}
             <input ref={logoInputRef} type="file" accept="image/*" style={{ display: "none" }} onChange={handleLogoUpload} />
           </div>
 

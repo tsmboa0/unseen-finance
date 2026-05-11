@@ -3,6 +3,7 @@ import prisma from "@/lib/db";
 import { notFound, requirePaymentToken } from "@/lib/auth";
 import { verifyTransactions } from "@/lib/solana";
 import { isExpired, serializePayment } from "@/lib/utils";
+import { syncMerchantInvoicePaidForPayment } from "@/lib/payments/sync-merchant-invoice-paid";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -149,6 +150,8 @@ export async function POST(request: NextRequest, { params }: Params) {
       txSignature: verifyResult.confirmedSignature ?? payment.txSignature,
     },
   });
+
+  await syncMerchantInvoicePaidForPayment(id);
 
   return NextResponse.json(
     serializePayment({

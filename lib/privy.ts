@@ -128,6 +128,8 @@ export async function requirePrivyAuth(request: Request) {
         walletAddress: authUser.walletAddress,
         umbraRegistered: false,
         umbraRegisteredAt: null,
+        payrollPrivySignerConsentAt: null,
+        payrollPrivySignerValidUntil: null,
       },
     });
   }

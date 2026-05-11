@@ -23,7 +23,7 @@ import {
   formatRelativeTime,
   truncateMiddle,
 } from "@/components/dashboard/formatters";
-import { Activity, DollarSign, ShieldCheck, Users, Zap, ChevronLeft, ChevronRight } from "lucide-react";
+import { DollarSign, ShieldCheck, Zap, ChevronLeft, ChevronRight, Store, FileText, Link2, Banknote } from "lucide-react";
 
 const PRODUCT_COLORS: Record<string, string> = {
   gateway: "#7b2fff",
@@ -228,7 +228,7 @@ export default function DashboardHome() {
       <div className="dash-balance-row">
         <BalanceCard />
         <div className="dash-kpi-stack">
-          <div className="dash-kpi-grid">
+          <div className="dash-kpi-grid dash-kpi-grid--6">
             <DStatCard
               icon={DollarSign}
               label="Total Volume (30d)"
@@ -237,22 +237,31 @@ export default function DashboardHome() {
               sparkline={<Sparkline data={last7Inflow} />}
             />
             <DStatCard
-              icon={ShieldCheck}
-              label="Shielded Rate"
-              value={formatPercent(kpis.shieldedShare)}
-              delta={d(kpis.shieldedShareDelta)}
-            />
-            <DStatCard
-              icon={Users}
-              label="Active Customers"
-              value={formatNumber(kpis.activeCustomers)}
-              delta={d(kpis.activeCustomersDelta)}
-            />
-            <DStatCard
               icon={Zap}
-              label="Avg Settlement"
-              value={`${kpis.avgSettlementMs}ms`}
-              delta={d(kpis.avgSettlementDelta)}
+              label="Gateway Txns"
+              value={formatNumber(kpis.gatewayTxns)}
+            />
+            <DStatCard
+              icon={Banknote}
+              label="Payroll Txns"
+              value={formatNumber(kpis.payrollTxns)}
+            />
+            <DStatCard
+              icon={Store}
+              label="Storefront Orders"
+              value={formatNumber(kpis.storefrontOrders)}
+              badge={kpis.newStorefrontOrders}
+            />
+            <DStatCard
+              icon={Link2}
+              label="Tiplinks"
+              value={formatNumber(kpis.tiplinksTotal)}
+            />
+            <DStatCard
+              icon={FileText}
+              label="Invoices"
+              value={formatNumber(kpis.invoicesTotal)}
+              delta={d(0)}
             />
           </div>
         </div>

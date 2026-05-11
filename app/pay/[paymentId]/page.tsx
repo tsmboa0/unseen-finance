@@ -2,11 +2,19 @@ import prisma from "@/lib/db";
 import CheckoutClient from "./checkout-client";
 import { serializePayment, getMintInfo, isExpired } from "@/lib/utils";
 import { mintPaymentToken } from "@/lib/payment-token";
+import { INVOICE_CHECKOUT_REF } from "@/lib/invoice/invoice-pay-url";
 
-type Params = { params: Promise<{ paymentId: string }> };
+type Props = {
+  params: Promise<{ paymentId: string }>;
+  searchParams?: Promise<{ ref?: string | string[] }>;
+};
 
-export default async function CheckoutPage({ params }: Params) {
+export default async function CheckoutPage({ params, searchParams }: Props) {
   const { paymentId } = await params;
+  const sp = searchParams ? await searchParams : {};
+  const refRaw = sp.ref;
+  const ref = Array.isArray(refRaw) ? refRaw[0] : refRaw;
+  const checkoutKind = ref === INVOICE_CHECKOUT_REF ? "invoice" : "hosted";
 
   const payment = await prisma.payment.findUnique({
     where: { id: paymentId },
@@ -55,7 +63,7 @@ export default async function CheckoutPage({ params }: Params) {
     expiresAt: payment.expiresAt.toISOString(),
   });
 
-  return <CheckoutClient payment={serialized} />;
+  return <CheckoutClient payment={serialized} checkoutKind={checkoutKind} />;
 }
 
 // ─── Server-rendered states ─────────────────────────────────────────────────

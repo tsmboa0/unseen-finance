@@ -14,15 +14,20 @@ export async function GET(req: NextRequest, { params }: Params) {
 
   const store = await prisma.store.findFirst({
     where: { id: storeId, merchantId: merchant.id },
-    include: { _count: { select: { products: true, orders: true } } },
+    include: { _count: { select: { products: true } } },
   });
 
   if (!store) return NextResponse.json({ error: "Store not found" }, { status: 404 });
 
+  // Count only orders where the associated payment is CONFIRMED
+  const confirmedOrderCount = await prisma.order.count({
+    where: { storeId, payment: { status: "CONFIRMED" } },
+  });
+
   return NextResponse.json({
     ...store,
     productCount: store._count.products,
-    orderCount: store._count.orders,
+    orderCount: confirmedOrderCount,
   });
 }
 

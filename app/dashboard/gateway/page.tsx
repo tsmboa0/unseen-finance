@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import {
   DPageHeader,
   DStatCard,
@@ -12,56 +12,64 @@ import {
   DModal,
   DSelect,
   DInput,
-  DEmptyState,
 } from "@/components/dashboard/primitives";
-import { Sparkline, AreaChart } from "@/components/dashboard/charts";
+import { Sparkline } from "@/components/dashboard/charts";
 import type { Transaction } from "@/lib/dashboard-types";
 import { useDashboardOverview } from "@/hooks/use-dashboard-overview";
 import {
   formatCurrency,
-  formatDelta,
   formatRelativeTime,
-  truncateMiddle,
   formatNumber,
 } from "@/components/dashboard/formatters";
-import { Shield, Copy, ExternalLink, Settings, Plus, RefreshCcw } from "lucide-react";
+import { Shield, Plus, ChevronLeft, ChevronRight } from "lucide-react";
 import { usePrivy } from "@privy-io/react-auth";
 
 const STATUS_MAP: Record<string, { variant: "success" | "warning" | "error" | "violet"; label: string }> = {
+  confirmed: { variant: "success", label: "Confirmed" },
   shielded: { variant: "success", label: "Shielded" },
   pending: { variant: "warning", label: "Pending" },
   failed: { variant: "error", label: "Failed" },
   released: { variant: "violet", label: "Released" },
 };
 
+const ITEMS_PER_PAGE = 10;
+
 const tabs = [
   { id: "all", label: "All" },
-  { id: "shielded", label: "Shielded" },
+  { id: "confirmed", label: "Confirmed" },
   { id: "pending", label: "Pending" },
+  { id: "failed", label: "Failed" },
 ];
 
 export default function GatewayPage() {
   const { data, loading } = useDashboardOverview();
   const { getAccessToken } = usePrivy();
-  const kpis = data?.overview.kpis;
-  const gatewayTx = (data?.overview.transactions ?? []).filter((t) => t.product === "gateway");
-  const [tab, setTab] = useState("all");
 
-  if (loading && !data) {
-    return (
-      <div className="d-card" style={{ minHeight: 220, display: "grid", placeItems: "center" }}>
-        <div style={{ width: 28, height: 28, border: "3px solid rgba(123,47,255,0.2)", borderTopColor: "#7b2fff", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
-      </div>
-    );
-  }
+  const [tab, setTab] = useState("all");
   const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
   const [modalOpen, setModalOpen] = useState(false);
   const [creating, setCreating] = useState(false);
-
   const [formAmount, setFormAmount] = useState("");
   const [formCurrency, setFormCurrency] = useState("USDC");
   const [formDescription, setFormDescription] = useState("");
   const [formPrivacy, setFormPrivacy] = useState("shielded");
+
+  // Only gateway product transactions — excludes claim, shield, unshield, payroll etc.
+  const gatewayTx = useMemo(
+    () => (data?.overview.transactions ?? []).filter((t) => t.product === "gateway"),
+    [data],
+  );
+
+  const gatewayVolume = useMemo(
+    () => gatewayTx.reduce((s, t) => s + t.amount, 0),
+    [gatewayTx],
+  );
+
+  const sparklineData = useMemo(
+    () => gatewayTx.slice(0, 7).map((t) => t.amount).reverse(),
+    [gatewayTx],
+  );
 
   const filtered = useMemo(() => {
     let list = gatewayTx;
@@ -78,10 +86,15 @@ export default function GatewayPage() {
     return list;
   }, [gatewayTx, tab, search]);
 
-  const sparklineData = useMemo(
-    () => gatewayTx.slice(0, 7).map((t) => t.amount).reverse(),
-    [gatewayTx],
-  );
+  // Reset to page 1 whenever the filter/search changes
+  useEffect(() => { setPage(1); }, [tab, search]);
+
+  const totalPages = Math.ceil(filtered.length / ITEMS_PER_PAGE) || 1;
+
+  const paginatedTx = useMemo(() => {
+    const start = (page - 1) * ITEMS_PER_PAGE;
+    return filtered.slice(start, start + ITEMS_PER_PAGE);
+  }, [filtered, page]);
 
   const columns = useMemo(
     () => [
@@ -111,7 +124,7 @@ export default function GatewayPage() {
         key: "status",
         header: "Status",
         render: (r: Transaction) => {
-          const s = STATUS_MAP[r.status];
+          const s = STATUS_MAP[r.status] ?? { variant: "warning" as const, label: r.status };
           return <DBadge variant={s.variant} dot>{s.label}</DBadge>;
         },
         width: "120px",
@@ -138,6 +151,14 @@ export default function GatewayPage() {
     ],
     [],
   );
+
+  if (loading && !data) {
+    return (
+      <div className="d-card" style={{ minHeight: 220, display: "grid", placeItems: "center" }}>
+        <div style={{ width: 28, height: 28, border: "3px solid rgba(123,47,255,0.2)", borderTopColor: "#7b2fff", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+      </div>
+    );
+  }
 
   function resetForm() {
     setFormAmount("");
@@ -192,19 +213,20 @@ export default function GatewayPage() {
         <DStatCard
           icon={Shield}
           label="Gateway Volume (30d)"
-          value={formatCurrency(gatewayTx.reduce((s, t) => s + t.amount, 0), "USDC", { compact: true })}
-          delta={formatDelta(kpis?.totalVolumeDelta ?? 0)}
+          value={formatCurrency(gatewayVolume, "USDC", { compact: true })}
           sparkline={<Sparkline data={sparklineData} />}
         />
         <DStatCard
           label="Sessions"
           value={formatNumber(gatewayTx.length)}
-          delta={formatDelta(0)}
         />
         <DStatCard
           label="Avg Session Value"
-          value={formatCurrency(gatewayTx.length ? gatewayTx.reduce((s, t) => s + t.amount, 0) / gatewayTx.length : 0, "USDC")}
-          delta={formatDelta(0)}
+          value={formatCurrency(gatewayTx.length ? gatewayVolume / gatewayTx.length : 0, "USDC")}
+        />
+        <DStatCard
+          label="Confirmed"
+          value={formatNumber(gatewayTx.filter((t) => t.status === "shielded" || t.status === "released").length)}
         />
       </div>
 
@@ -218,12 +240,43 @@ export default function GatewayPage() {
             <div style={{ width: 24, height: 24, border: "3px solid rgba(123,47,255,0.2)", borderTopColor: "#7b2fff", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
           </div>
         ) : (
-        <DTable
-          columns={columns}
-          data={filtered}
-          emptyTitle="No payments found"
-          emptyDescription="Try adjusting your filters or search query."
-        />
+          <>
+            <DTable
+              columns={columns}
+              data={paginatedTx}
+              emptyTitle="No gateway payments found"
+              emptyDescription="Try adjusting your filters or search query."
+            />
+            {totalPages > 1 && (
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 16, padding: "0 8px" }}>
+                <span style={{ fontSize: 13, color: "var(--color-text-muted)", fontWeight: 500 }}>
+                  Showing {(page - 1) * ITEMS_PER_PAGE + 1}–{Math.min(page * ITEMS_PER_PAGE, filtered.length)} of {filtered.length}
+                </span>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button
+                    type="button"
+                    className="d-btn d-btn--secondary d-btn--sm"
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    disabled={page === 1}
+                    style={{ display: "flex", alignItems: "center", gap: 6 }}
+                  >
+                    <ChevronLeft size={14} aria-hidden />
+                    <span>Previous</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="d-btn d-btn--secondary d-btn--sm"
+                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                    disabled={page === totalPages}
+                    style={{ display: "flex", alignItems: "center", gap: 6 }}
+                  >
+                    <span>Next</span>
+                    <ChevronRight size={14} aria-hidden />
+                  </button>
+                </div>
+              </div>
+            )}
+          </>
         )}
       </div>
 

@@ -1,10 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { ShoppingCart, Shield, Store } from "lucide-react";
+import { ShoppingCart, Store } from "lucide-react";
 import { CartProvider, useCart } from "@/components/store/cart-context";
 import { ThemeToggle } from "@/components/theme-toggle";
 import type { ReactNode } from "react";
+import { UNSEEN_LOGO_DARK_SRC } from "@/components/unseen/logo";
 import "./storefront.css";
 
 type StoreInfo = {
@@ -72,9 +73,14 @@ function StoreFooter({ store }: { store: StoreInfo }) {
     <footer className="storefront__footer">
       <div className="storefront__footer-inner">
         <span className="storefront__footer-powered">
-          <Shield size={12} /> Powered by{" "}
-          <a href="https://unseen.finance" target="_blank" rel="noreferrer">
-            Unseen Finance
+          <span>Powered by</span>
+          <a
+            href="https://unseen.finance"
+            target="_blank"
+            rel="noreferrer"
+            className="storefront__footer-brand"
+          >
+            <img src={UNSEEN_LOGO_DARK_SRC} alt="Unseen Finance" className="storefront__powered-logo" />
           </a>
         </span>
         <span className="storefront__footer-privacy">

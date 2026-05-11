@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { usePrivy } from "@privy-io/react-auth";
 import type { DashboardOverview } from "@/lib/dashboard-types";
@@ -26,9 +26,15 @@ export function useDashboardOverview() {
   const [data, setData] = useState<OverviewResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Track whether we've ever completed a successful load so subsequent
+  // refreshes can run silently without showing the spinner again.
+  const hasLoadedOnce = useRef(false);
 
   const load = useCallback(async () => {
-    setLoading(true);
+    // Only show the full loading spinner on the very first fetch.
+    // After that, updates happen silently — data stays visible during re-fetch.
+    const showSpinner = !hasLoadedOnce.current;
+    if (showSpinner) setLoading(true);
     setError(null);
     try {
       const token = await getAccessToken();
@@ -46,10 +52,11 @@ export function useDashboardOverview() {
       if (!res.ok) throw new Error(`Overview HTTP ${res.status}`);
       const json = (await res.json()) as OverviewResponse;
       setData(json);
+      hasLoadedOnce.current = true;
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load dashboard data");
     } finally {
-      setLoading(false);
+      if (showSpinner) setLoading(false);
     }
   }, [getAccessToken, router]);
 
@@ -58,9 +65,8 @@ export function useDashboardOverview() {
   }, [load]);
 
   useEffect(() => {
-    const onRefresh = () => {
-      void load();
-    };
+    // Subsequent refreshes triggered by other parts of the app — silent, no spinner
+    const onRefresh = () => void load();
     window.addEventListener("dashboard:refresh", onRefresh as EventListener);
     return () => {
       window.removeEventListener("dashboard:refresh", onRefresh as EventListener);

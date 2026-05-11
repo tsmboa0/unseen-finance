@@ -455,15 +455,38 @@ export function DStatCard({
   delta,
   icon: Icon,
   sparkline,
+  badge,
 }: {
   label: string;
   value: string;
   delta?: { label: string; isPositive: boolean; isZero: boolean };
   icon?: LucideIcon;
   sparkline?: ReactNode;
+  badge?: number;
 }) {
   return (
-    <div className="d-stat">
+    <div className="d-stat" style={{ position: "relative" }}>
+      {badge != null && badge > 0 && (
+        <span
+          style={{
+            position: "absolute",
+            top: 8,
+            right: 8,
+            background: "#7b2fff",
+            color: "#fff",
+            fontSize: "10px",
+            fontWeight: 700,
+            lineHeight: 1,
+            padding: "2px 5px",
+            borderRadius: "9999px",
+            minWidth: 16,
+            textAlign: "center",
+            boxShadow: "0 1px 4px rgba(123,47,255,0.4)",
+          }}
+        >
+          {badge > 99 ? "99+" : badge}
+        </span>
+      )}
       <div className="d-stat__top">
         {Icon && <Icon aria-hidden className="d-stat__icon" size={18} />}
         <span className="d-stat__label">{label}</span>

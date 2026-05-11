@@ -13,12 +13,21 @@ export async function GET(req: NextRequest) {
     where: { merchantId: merchant.id },
     orderBy: { createdAt: "desc" },
     include: {
-      _count: { select: { products: true, orders: true } },
+      _count: { select: { products: true } },
     },
   });
 
+  // Count only CONFIRMED orders per store (payments that actually went through)
+  const confirmedOrderCounts = await Promise.all(
+    stores.map((s) =>
+      prisma.order.count({
+        where: { storeId: s.id, payment: { status: "CONFIRMED" } },
+      }),
+    ),
+  );
+
   return NextResponse.json({
-    data: stores.map((s) => ({
+    data: stores.map((s, i) => ({
       id: s.id,
       name: s.name,
       slug: s.slug,
@@ -29,7 +38,7 @@ export async function GET(req: NextRequest) {
       privacy: s.privacy,
       status: s.status,
       productCount: s._count.products,
-      orderCount: s._count.orders,
+      orderCount: confirmedOrderCounts[i] ?? 0,
       createdAt: s.createdAt,
       updatedAt: s.updatedAt,
     })),

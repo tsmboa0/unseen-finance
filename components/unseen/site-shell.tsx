@@ -177,9 +177,15 @@ const paletteGroups = [
 export function SiteShell({
   children,
   footerMode = "default",
+  headerVariant = "default",
+  footerVariant = "default",
 }: {
   children: ReactNode;
   footerMode?: "default" | "compact";
+  /** Minimal: logo + theme only (e.g. auditor tool). */
+  headerVariant?: "default" | "minimal";
+  /** Micro: copyright strip only. */
+  footerVariant?: "default" | "micro";
 }) {
   const [stage, setStage] = useState(0);
 
@@ -198,17 +204,17 @@ export function SiteShell({
     <LazyMotion features={domAnimation}>
       <ScrollProgress />
       <Cursor active={stage >= 1} />
-      <CommandPalette />
-      <Navbar stage={stage} />
+      {headerVariant === "default" ? <CommandPalette /> : null}
+      <Navbar stage={stage} variant={headerVariant} />
       <div className="unseen-site-shell">
         {children}
-        <Footer mode={footerMode} />
+        <Footer mode={footerMode} variant={footerVariant} />
       </div>
     </LazyMotion>
   );
 }
 
-function Navbar({ stage }: { stage: number }) {
+function Navbar({ stage, variant }: { stage: number; variant: "default" | "minimal" }) {
   const [scrolled, setScrolled] = useState(false);
   const [openMenu, setOpenMenu] = useState<"products" | "solutions" | null>(
     null,
@@ -289,6 +295,36 @@ function Navbar({ stage }: { stage: number }) {
     setDrawerOpen(false);
     setOpenMenu(null);
   };
+
+  if (variant === "minimal") {
+    return (
+      <div className={`navbar-shell ${scrolled ? "is-scrolled" : ""}`}>
+        <div className="navbar-inner">
+          <m.div
+            animate={{
+              opacity: stage >= 2 ? 1 : 0,
+              y: stage >= 2 ? 0 : -8,
+            }}
+            className="navbar-logo-wrap"
+            transition={{ duration: reducedMotion ? 0 : 0.5, ease: [0.16, 1, 0.3, 1] }}
+          >
+            <UnseenLogo />
+          </m.div>
+          <div style={{ flex: 1 }} aria-hidden />
+          <m.div
+            animate={{
+              opacity: stage >= 4 ? 1 : 0,
+              y: stage >= 4 ? 0 : -8,
+            }}
+            className="navbar-actions"
+            transition={{ duration: reducedMotion ? 0 : 0.35 }}
+          >
+            <ThemeToggle />
+          </m.div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <>
@@ -850,7 +886,21 @@ function ScrollProgress() {
   return <div id="scroll-progress" style={{ height: `${progress}%` }} />;
 }
 
-function Footer({ mode }: { mode: "default" | "compact" }) {
+function Footer({
+  mode,
+  variant = "default",
+}: {
+  mode: "default" | "compact";
+  variant?: "default" | "micro";
+}) {
+  if (variant === "micro") {
+    return (
+      <footer className="site-footer site-footer--micro">
+        <p className="site-footer--micro__text">© 2026 Unseen Finance</p>
+      </footer>
+    );
+  }
+
   return (
     <footer className={`site-footer ${mode === "compact" ? "site-footer--compact" : ""}`}>
       <div className="site-footer__grid">

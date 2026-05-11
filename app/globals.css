@@ -376,7 +376,7 @@ body.cursor-hover #cursor-ring {
 .navbar-inner {
   align-items: center;
   display: flex;
-  height: 72px;
+  min-height: 73px;
   justify-content: space-between;
   margin: 0 auto;
   max-width: 1280px;
@@ -388,75 +388,27 @@ body.cursor-hover #cursor-ring {
 .unseen-logo {
   align-items: center;
   display: inline-flex;
-  gap: 14px;
-  min-height: 40px;
+  line-height: 0;
 }
 
-.unseen-logo__mark {
-  height: 42px;
-  position: relative;
-  width: 42px;
-}
-
-.unseen-logo__mark svg {
-  height: 100%;
-  overflow: visible;
-  width: 100%;
-}
-
-.unseen-logo__shield,
-.unseen-logo__eye,
-.unseen-logo__slash {
-  transition:
-    filter var(--duration-base) var(--ease-out-expo),
-    stroke-dashoffset 0.4s var(--ease-out-expo);
-}
-
-.unseen-logo__slash {
-  stroke-dasharray: 22;
-  stroke-dashoffset: 0;
+/* Logo size (marketing header): tweak `height` / `max-width`. Compact variant below. Checkout + store: see checkout-client.tsx + storefront.css */
+.unseen-logo__img {
+  display: block;
+  height: 62px;
+  width: auto;
+  max-width: min(448px, 90vw);
+  object-fit: contain;
 }
 
 @media (hover: hover) {
-  .unseen-logo:hover .unseen-logo__shield {
-    filter: drop-shadow(0 0 10px rgba(168, 85, 247, 0.8));
-  }
-
-  .unseen-logo:hover .unseen-logo__slash {
-    stroke-dashoffset: 22;
+  .unseen-logo:hover .unseen-logo__img {
+    opacity: 0.9;
   }
 }
 
-.unseen-logo__type {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.unseen-logo__name {
-  color: var(--color-text-primary);
-  font-family: var(--font-display), sans-serif;
-  font-size: 1.125rem;
-  font-weight: 800;
-  letter-spacing: -0.04em;
-  line-height: 1;
-}
-
-.unseen-logo__subline {
-  color: var(--color-text-secondary);
-  font-size: 9px;
-  font-weight: 500;
-  letter-spacing: 0.3em;
-  line-height: 1;
-}
-
-.unseen-logo--compact .unseen-logo__mark {
-  height: 38px;
-  width: 38px;
-}
-
-.unseen-logo--compact .unseen-logo__name {
-  font-size: 1rem;
+.unseen-logo--compact .unseen-logo__img {
+  height: 48px;
+  max-width: min(364px, 70vw);
 }
 
 .navbar-links,
@@ -4056,6 +4008,22 @@ body.cursor-hover #cursor-ring {
   gap: 18px;
 }
 
+.site-footer--micro {
+  padding: 20px 24px 28px;
+  text-align: center;
+}
+
+.site-footer--micro::before {
+  width: 24%;
+  opacity: 0.55;
+}
+
+.site-footer--micro__text {
+  margin: 0;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
 .placeholder-page {
   min-height: 100vh;
   position: relative;
@@ -4195,7 +4163,7 @@ body.cursor-hover #cursor-ring {
 
   .hero-section {
     padding-bottom: 60px;
-    padding-top: 112px;
+    padding-top: 90px;
   }
 
   .hero-visual {
@@ -5220,7 +5188,8 @@ body.cursor-hover #cursor-ring {
 
 .dash-balance-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(344px, 420px);
+  /* Balance card gets ~62% of the row; stat stack gets ~38% */
+  grid-template-columns: 1.6fr minmax(0, 1fr);
   gap: 14px;
   margin-bottom: 24px;
   align-items: start;
@@ -5250,6 +5219,11 @@ body.cursor-hover #cursor-ring {
 .dash-balance-row .dash-kpi-stack .dash-kpi-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   margin-bottom: 0;
+}
+
+/* 6-card grid — 2 columns × 3 rows */
+.dash-balance-row .dash-kpi-stack .dash-kpi-grid--6 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 /* Inline stat row (horizontal strip) */
@@ -6653,6 +6627,12 @@ body.cursor-hover #cursor-ring {
     grid-template-columns: 1fr;
   }
 
+  /* When stacked, the 6-card grid sits below the balance card full-width;
+     keep 2 columns so it stays compact and not overwhelming */
+  .dash-balance-row .dash-kpi-stack .dash-kpi-grid--6 {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
   .dash-charts-row {
     grid-template-columns: 1fr;
   }
@@ -6672,6 +6652,11 @@ body.cursor-hover #cursor-ring {
   .d-grid--3,
   .d-grid--4 {
     grid-template-columns: repeat(2, 1fr);
+  }
+
+  /* 6-card grid on mobile: 2 columns */
+  .dash-balance-row .dash-kpi-stack .dash-kpi-grid--6 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   /* Very narrow: single column for 2-col grid */

@@ -21,6 +21,8 @@ function serializeMerchant(merchant: {
   webhookUrl: string | null;
   umbraRegistered: boolean;
   umbraRegisteredAt: Date | null;
+  payrollPrivySignerConsentAt: Date | null;
+  payrollPrivySignerValidUntil: Date | null;
   onboardingCompletedAt: Date | null;
   createdAt: Date;
 }) {
@@ -43,6 +45,8 @@ function serializeMerchant(merchant: {
     webhookUrl: merchant.webhookUrl,
     umbraRegistered: merchant.umbraRegistered,
     umbraRegisteredAt: merchant.umbraRegisteredAt?.toISOString() ?? null,
+    payrollPrivySignerConsentAt: merchant.payrollPrivySignerConsentAt?.toISOString() ?? null,
+    payrollPrivySignerValidUntil: merchant.payrollPrivySignerValidUntil?.toISOString() ?? null,
     onboardingCompletedAt: merchant.onboardingCompletedAt?.toISOString() ?? null,
     createdAt: merchant.createdAt,
   };

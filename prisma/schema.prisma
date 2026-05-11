@@ -32,6 +32,10 @@ model Merchant {
   /// True after the merchant completes Umbra on-chain registration (encrypted + anonymous) for walletAddress.
   umbraRegistered   Boolean   @default(false)
   umbraRegisteredAt DateTime?
+  /// Last time the merchant completed Privy `addSigners` (app signer + payroll policy) in the dashboard.
+  payrollPrivySignerConsentAt  DateTime?
+  /// After this instant we show the payroll delegation explainer again before `addSigners` (server vs client clock skew is acceptable).
+  payrollPrivySignerValidUntil DateTime?
   onboardingCompletedAt DateTime?
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
@@ -42,6 +46,158 @@ model Merchant {
   umbraScanCursors UmbraUtxoScanCursor[]
   umbraUtxos UmbraMerchantUtxo[]
   dashboardEvents DashboardEvent[]
+  payrollRuns   PayrollRun[]
+  giftCards     GiftCard[]
+  merchantInvoices MerchantInvoice[]
+  complianceGrants ComplianceGrant[]
+  complianceDisclosureReports ComplianceDisclosureReport[]
+  umbraScopedViewingKeys UmbraScopedViewingKey[]
+}
+
+/// Umbra user-granted compliance grant metadata (on-chain PDA + optional auditor X25519).
+model ComplianceGrant {
+  id                  String    @id @default(cuid())
+  merchantId          String
+  merchant            Merchant  @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  label               String
+  receiverWallet      String
+  /// 64 hex chars (no 0x), auditor / receiver X25519 public key.
+  receiverX25519Hex   String
+  /// U128 nonce (RcEncryptionNonce) as decimal string — must match create/revoke txs.
+  nonceDecimal        String
+  status              String    @default("active") // active | revoked
+  createTxSignature   String?
+  revokeTxSignature   String?
+  lastChainCheckAt    DateTime?
+  lastChainCheckExists Boolean?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  revokedAt           DateTime?
+
+  @@index([merchantId, status])
+  @@index([merchantId, createdAt])
+}
+
+/// Merchant-issued confidential disclosure package (PDF) for auditors / regulators.
+model ComplianceDisclosureReport {
+  id              String   @id @default(cuid())
+  merchantId      String
+  merchant        Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  title           String
+  dateFrom        DateTime
+  dateTo          DateTime
+  txType          String   @default("all") // all | inflow | outflow
+  /// JSON array of dashboard product slugs included in scope.
+  productsJson    String
+  recipientEmail  String?
+  status          String   @default("ready") // generating | ready | expired
+  generatedAt     DateTime @default(now())
+  approxSizeBytes Int?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([merchantId, createdAt])
+}
+
+/// Locally derived Umbra Poseidon viewing key (mint- and time-scoped). Sensitive — dashboard-auth only.
+model UmbraScopedViewingKey {
+  id           String   @id @default(cuid())
+  merchantId   String
+  merchant     Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  label        String
+  /// mint | yearly | monthly | daily | hourly | minute | second
+  scope        String
+  mintAddress  String
+  year         Int?
+  month        Int?
+  day          Int?
+  hour         Int?
+  minute       Int?
+  second       Int?
+  /// Fixed-width hex (64 nybbles) BN254 field element from Umbra SDK.
+  keyHex       String
+  createdAt    DateTime @default(now())
+
+  @@index([merchantId, createdAt])
+}
+
+// ─── Gift cards (admin treasury → self-claimable UTXO → recipient public ATA) ───
+model GiftCard {
+  id                String    @id @default(cuid())
+  merchantId        String
+  merchant          Merchant  @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  network           String
+  status            String    @default("pending_funding") // pending_funding | active | claimed | expired | funding_failed | claim_failed
+  /// Face value (display units, e.g. 10.5 USDC).
+  amountDisplay     Float
+  /// Face value in raw units (USDC 6 decimals) — amount locked in the gift UTXO.
+  faceAmountRaw     BigInt
+  /// Total the merchant must fund (face + platform fee).
+  fundAmountRaw     BigInt
+  platformFeeRaw    BigInt
+  mint              String
+  memo              String
+  claimCodeHash     String    @unique
+  /// Plain claim code for merchant dashboard copy; null until funded & issued. Never expose on public APIs.
+  claimCodePlain    String?
+  expiresAt         DateTime
+  fundingTxSig      String?
+  createUtxoTxSig   String?
+  claimTxSig        String?
+  /// Ephemeral Umbra generation index (decimal string) used when creating the self-claimable UTXO.
+  utxoGenerationIndex String?
+  claimError        String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  claimedAt         DateTime?
+  activatedAt       DateTime?
+
+  @@index([merchantId, createdAt])
+  @@index([merchantId, status])
+  @@index([status, expiresAt])
+}
+
+/// Per-wallet (hashed) Umbra scan floor so repeat gift redemptions skip already-claimed leaves.
+/// Does not store recipient pubkey; key is sha256(pubkey|network).
+model PublicGiftClaimCursor {
+  id             String   @id @default(cuid())
+  recipientKey   String
+  network        String
+  /// JSON map: tree index string → max claimed insertion index (decimal string).
+  treeBaselines  Json     @default("{}")
+  updatedAt      DateTime @updatedAt
+  createdAt      DateTime @default(now())
+
+  @@unique([recipientKey, network])
+  @@index([network])
+}
+
+/// Merchant-issued invoice (line items + optional Payment for hosted checkout).
+model MerchantInvoice {
+  id               String    @id @default(cuid())
+  merchantId       String
+  merchant         Merchant  @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  invoiceNumber    String
+  status           String    @default("draft") // draft | sent | paid | overdue | cancelled
+  clientName       String
+  clientEmail      String?
+  /// JSON array: { name, description?, quantity, unitPrice, lineTotal }
+  lineItems        Json
+  currency         String    @default("USDC")
+  subtotalDisplay  Float
+  totalAmountRaw   BigInt
+  mint             String
+  notes            String?
+  dueAt            DateTime
+  issuedAt         DateTime  @default(now())
+  paymentId        String?   @unique
+  payment          Payment?  @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@unique([merchantId, invoiceNumber])
+  @@index([merchantId, status])
+  @@index([merchantId, createdAt])
 }
 
 // ─── ApiKeyRecord ────────────────────────────────────────────────────────────
@@ -104,6 +260,7 @@ model Payment {
   updatedAt   DateTime @updatedAt
 
   orders Order[]
+  merchantInvoice MerchantInvoice?
 
   @@index([merchantId])
   @@index([merchantId, status])
@@ -173,11 +330,15 @@ model Order {
   paymentId     String
   payment       Payment  @relation(fields: [paymentId], references: [id])
 
-  customerEmail String?
-  items         String          // JSON string: [{productId, name, qty, price}]
-  totalAmount   BigInt
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  customerName    String?
+  customerEmail   String?
+  shippingAddress String?   // JSON: {addressLine, city, country, postalCode}
+  items           String    // JSON string: [{productId, name, qty, price}]
+  totalAmount     BigInt
+  deliveryStatus  String   @default("received")  // "received" | "delivered"
+  deliveredAt     DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
   @@index([storeId])
   @@index([paymentId])
@@ -232,6 +393,40 @@ model UmbraMerchantUtxo {
   @@unique([merchantId, network, walletAddress, treeIndex, insertionIndex])
   @@index([merchantId, status])
   @@index([walletAddress, status])
+}
+
+// ─── Payroll (public → employee ETA via Umbra deposit) ───────────────────────
+model PayrollRun {
+  id              String   @id @default(cuid())
+  merchantId      String
+  merchant        Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  memo            String
+  currency        String // USDC | USDT
+  category        String?
+  status          String // draft | awaiting_delegation | processing | completed | partial | failed
+  recipientCount  Int
+  successCount    Int
+  totalAmount     Float // sum of successfully deposited amounts (display units)
+  /// Privy policy attached before wallet delegation (server-signed payroll).
+  privyPolicyId   String?
+  createdAt       DateTime @default(now())
+
+  items PayrollRunItem[]
+
+  @@index([merchantId, createdAt])
+}
+
+model PayrollRunItem {
+  id                 String     @id @default(cuid())
+  runId              String
+  run                PayrollRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  destinationAddress String
+  amount             Float
+  status             String // pending | completed | failed
+  txHash             String?
+  error              String?
+
+  @@index([runId])
 }
 
 // ─── Dashboard Event Stream ───────────────────────────────────────────────────

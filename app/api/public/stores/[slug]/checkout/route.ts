@@ -26,7 +26,14 @@ export async function POST(req: NextRequest, { params }: Params) {
 
   let body: {
     items: { productId: string; qty: number }[];
+    customerName?: string;
     customerEmail?: string;
+    shippingAddress?: {
+      addressLine: string;
+      city: string;
+      country: string;
+      postalCode: string;
+    };
   };
   try {
     body = await req.json();
@@ -103,7 +110,9 @@ export async function POST(req: NextRequest, { params }: Params) {
     data: {
       storeId: store.id,
       paymentId: payment.id,
+      customerName: body.customerName ?? null,
       customerEmail: body.customerEmail ?? null,
+      shippingAddress: body.shippingAddress ? JSON.stringify(body.shippingAddress) : null,
       items: JSON.stringify(orderItems),
       totalAmount,
     },

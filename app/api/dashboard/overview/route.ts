@@ -1,9 +1,30 @@
 import { NextRequest, NextResponse } from "next/server";
+import { PrismaClientKnownRequestError } from "@prisma/client/runtime/client";
+import { Prisma } from "@prisma/client";
 import prisma from "@/lib/db";
+import { appBaseUrl } from "@/lib/invoice/app-base-url";
+import { invoicePayAbsoluteUrl } from "@/lib/invoice/invoice-pay-url";
 import { requirePrivyAuth } from "@/lib/privy";
-import type { DashboardOverview, Product, Transaction } from "@/lib/dashboard-types";
+import type {
+  ComplianceReport,
+  DashboardOverview,
+  GiftCard,
+  Invoice,
+  PayrollRun,
+  Product,
+  ScopedViewingKey,
+  ScopedViewingKeyScope,
+  Transaction,
+  ViewingKey,
+} from "@/lib/dashboard-types";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+function formatBytesUi(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(2)} MB`;
+}
 const PRODUCT_LABELS: Record<Product, string> = {
   gateway: "Gateway",
   payroll: "Payroll",
@@ -213,24 +234,90 @@ export async function GET(request: NextRequest) {
 
   const orders = await prisma.order.findMany({
     where: { store: { merchantId: merchant.id } },
-    select: { id: true, totalAmount: true, createdAt: true },
+    select: {
+      id: true,
+      totalAmount: true,
+      createdAt: true,
+      payment: { select: { status: true, confirmedAt: true } },
+    },
   });
 
-  const invoices = payments
-    .filter((p) => productFromReference(p.reference) === "invoice")
-    .map((p, idx) => ({
-      id: p.id,
-      number: `INV-${new Date(p.createdAt).getUTCFullYear()}-${String(idx + 1).padStart(3, "0")}`,
-      client: p.reference ?? "Client",
-      email: merchant.email ?? "",
-      amount: Number(p.amount) / 1_000_000,
-      currency: "USDC" as const,
-      status: (
-        p.status === "CONFIRMED" ? "paid" : p.status === "PENDING" ? "sent" : p.status === "EXPIRED" ? "overdue" : "draft"
-      ) as "draft" | "sent" | "paid" | "overdue",
-      issuedAt: p.createdAt.getTime(),
-      dueAt: p.createdAt.getTime() + 7 * DAY_MS,
-    }));
+  const confirmedOrders = orders.filter((o) => o.payment.status === "CONFIRMED");
+  const newOrderCutoff = now - 48 * 60 * 60 * 1000;
+  const newStorefrontOrders = confirmedOrders.filter(
+    (o) => o.payment.confirmedAt && o.payment.confirmedAt.getTime() > newOrderCutoff,
+  ).length;
+
+  type MerchantInvoiceWithPay = Prisma.MerchantInvoiceGetPayload<{
+    include: { payment: { select: { id: true; status: true } } };
+  }>;
+  let merchantInvoicesRows: MerchantInvoiceWithPay[] = [];
+  try {
+    merchantInvoicesRows = await prisma.merchantInvoice.findMany({
+      where: { merchantId: merchant.id },
+      orderBy: { createdAt: "desc" },
+      take: 80,
+      include: { payment: { select: { id: true, status: true } } },
+    });
+  } catch (e) {
+    if (!(e instanceof PrismaClientKnownRequestError) || e.code !== "P2021") throw e;
+  }
+
+  const appPublic = appBaseUrl();
+  const invoices = merchantInvoicesRows.map((inv) => {
+    const pay = inv.payment;
+    let status: Invoice["status"] = "draft";
+    if (pay?.status === "CONFIRMED") status = "paid";
+    else if (pay?.status === "EXPIRED" || pay?.status === "CANCELLED") status = "overdue";
+    else if (pay?.status === "PENDING") {
+      status = inv.dueAt.getTime() < Date.now() ? "overdue" : "sent";
+    }
+    return {
+      id: inv.id,
+      number: inv.invoiceNumber,
+      client: inv.clientName,
+      email: inv.clientEmail ?? "",
+      amount: inv.subtotalDisplay,
+      currency: (inv.currency === "USDT" ? "USDT" : "USDC") as Invoice["currency"],
+      status,
+      issuedAt: inv.issuedAt.getTime(),
+      dueAt: inv.dueAt.getTime(),
+      paymentId: inv.paymentId,
+      checkoutUrl: inv.paymentId ? invoicePayAbsoluteUrl(appPublic, inv.paymentId) : null,
+    };
+  });
+
+  let payrollRunRows: Awaited<ReturnType<typeof prisma.payrollRun.findMany>> = [];
+  try {
+    payrollRunRows = await prisma.payrollRun.findMany({
+      where: { merchantId: merchant.id },
+      orderBy: { createdAt: "desc" },
+      take: 50,
+    });
+  } catch (e) {
+    // Migration not applied yet (e.g. PayrollRun table missing)
+    if (!(e instanceof PrismaClientKnownRequestError) || e.code !== "P2021") throw e;
+  }
+
+  const payrollRuns: PayrollRun[] = payrollRunRows.map((r) => {
+    let category: PayrollRun["category"] = "Employees";
+    if (r.category === "Contractors" || r.category === "Advisors" || r.category === "Partners") {
+      category = r.category;
+    }
+    const ts = r.createdAt.getTime();
+    return {
+      id: r.id,
+      memo: r.memo,
+      category,
+      recipientCount: r.recipientCount,
+      total: r.totalAmount,
+      currency: r.currency === "USDT" ? "USDT" : "USDC",
+      status: r.status as PayrollRun["status"],
+      scheduledFor: ts,
+      completedAt: ts,
+      successCount: r.successCount,
+    };
+  });
 
   const notifications = transactions.slice(0, 6).map((t) => ({
     id: t.id,
@@ -251,6 +338,144 @@ export async function GET(request: NextRequest) {
     },
   ];
 
+  const allGatewayTxns = transactions.filter(
+    (t) => t.product === "gateway" && t.status === "shielded",
+  ).length;
+  const allPayrollTxns = transactions.filter(
+    (t) => t.product === "payroll",
+  ).length;
+  const allTiplinks = transactions.filter(
+    (t) => t.product === "tiplinks",
+  ).length;
+  const allInvoices = merchantInvoicesRows.length;
+
+  let giftCardRows: Awaited<ReturnType<typeof prisma.giftCard.findMany>> = [];
+  try {
+    giftCardRows = await prisma.giftCard.findMany({
+      where: { merchantId: merchant.id },
+      orderBy: { createdAt: "desc" },
+      take: 50,
+    });
+  } catch (e) {
+    if (!(e instanceof PrismaClientKnownRequestError) || e.code !== "P2021") throw e;
+  }
+
+  const giftCards: GiftCard[] = giftCardRows.map((g) => {
+    let status: GiftCard["status"] = "active";
+    if (g.status === "claimed") status = "redeemed";
+    else if (g.status === "expired") status = "expired";
+    else if (g.status === "pending_funding") status = "pending";
+    else if (g.status === "claim_failed" || g.status === "funding_failed") status = "failed";
+    return {
+      id: g.id,
+      memo: g.memo,
+      amount: g.amountDisplay,
+      currency: "USDC" as const,
+      status,
+      createdAt: g.createdAt.getTime(),
+      code: `····${g.id.slice(-6)}`,
+      claimCode: g.claimCodePlain ?? null,
+    };
+  });
+
+  let complianceGrantRows: Awaited<ReturnType<typeof prisma.complianceGrant.findMany>> = [];
+  let complianceReportRows: Awaited<ReturnType<typeof prisma.complianceDisclosureReport.findMany>> = [];
+  try {
+    complianceGrantRows = await prisma.complianceGrant.findMany({
+      where: { merchantId: merchant.id },
+      orderBy: { createdAt: "desc" },
+      take: 100,
+    });
+    complianceReportRows = await prisma.complianceDisclosureReport.findMany({
+      where: { merchantId: merchant.id },
+      orderBy: { createdAt: "desc" },
+      take: 100,
+    });
+  } catch (e) {
+    if (!(e instanceof PrismaClientKnownRequestError) || e.code !== "P2021") throw e;
+  }
+
+  const complianceReports: ComplianceReport[] = complianceReportRows.map((r) => {
+    let products: Product[] = [];
+    try {
+      const parsed = JSON.parse(r.productsJson) as unknown;
+      if (Array.isArray(parsed)) {
+        products = parsed.filter((p): p is Product => typeof p === "string");
+      }
+    } catch {
+      products = [];
+    }
+
+    let status: ComplianceReport["status"] = "ready";
+    if (r.status === "generating") status = "generating";
+    else if (r.status === "expired") status = "expired";
+
+    const approx = r.approxSizeBytes ?? 48_000;
+    return {
+      id: r.id,
+      title: r.title,
+      range: { from: r.dateFrom.getTime(), to: r.dateTo.getTime() },
+      products: products.length > 0 ? products : (["gateway", "payroll", "storefronts", "x402", "invoice", "tiplinks"] as Product[]),
+      recipient: r.recipientEmail ?? "—",
+      generatedAt: r.generatedAt.getTime(),
+      status,
+      size: formatBytesUi(approx),
+      pdfPath: `/api/dashboard/compliance/reports/${r.id}/pdf`,
+    };
+  });
+
+  let scopedViewingKeyRows: Awaited<ReturnType<typeof prisma.umbraScopedViewingKey.findMany>> = [];
+  try {
+    scopedViewingKeyRows = await prisma.umbraScopedViewingKey.findMany({
+      where: { merchantId: merchant.id },
+      orderBy: { createdAt: "desc" },
+      take: 200,
+    });
+  } catch (e) {
+    if (!(e instanceof PrismaClientKnownRequestError) || e.code !== "P2021") throw e;
+  }
+
+  const scopedViewingKeys: ScopedViewingKey[] = scopedViewingKeyRows.map((row) => {
+    const scope = row.scope as ScopedViewingKeyScope;
+    return {
+      id: row.id,
+      label: row.label,
+      scope,
+      mintAddress: row.mintAddress,
+      year: row.year ?? undefined,
+      month: row.month ?? undefined,
+      day: row.day ?? undefined,
+      hour: row.hour ?? undefined,
+      minute: row.minute ?? undefined,
+      second: row.second ?? undefined,
+      keyHex: row.keyHex,
+      createdAt: row.createdAt.getTime(),
+    };
+  });
+
+  const viewingKeys: ViewingKey[] = complianceGrantRows.map((g) => {
+    const w = g.receiverWallet;
+    const short = w.length > 12 ? `${w.slice(0, 4)}…${w.slice(-4)}` : w;
+    const tenYears = 10 * 365 * DAY_MS;
+    return {
+      id: g.id,
+      label: g.label,
+      scope: "account" as const,
+      scopeTarget: short,
+      createdAt: g.createdAt.getTime(),
+      expiresAt: g.revokedAt?.getTime() ?? g.createdAt.getTime() + tenYears,
+      shares: g.status === "active" ? 1 : 0,
+      grantStatus: g.status === "active" ? "active" : "revoked",
+      receiverWallet: g.receiverWallet,
+      receiverX25519Hex: g.receiverX25519Hex,
+      nonceDecimal: g.nonceDecimal,
+      onChainGrantExists: g.lastChainCheckExists ?? null,
+      lastChainCheckAt: g.lastChainCheckAt?.getTime() ?? null,
+      createTxSignature: g.createTxSignature,
+      revokeTxSignature: g.revokeTxSignature,
+    };
+  });
+
   const overview: DashboardOverview = {
     kpis: {
       totalVolume30d,
@@ -261,19 +486,26 @@ export async function GET(request: NextRequest) {
       activeCustomersDelta: 0,
       avgSettlementMs: 0,
       avgSettlementDelta: 0,
+      gatewayTxns: allGatewayTxns,
+      payrollTxns: allPayrollTxns,
+      storefrontOrders: confirmedOrders.length,
+      newStorefrontOrders,
+      tiplinksTotal: allTiplinks,
+      invoicesTotal: allInvoices,
     },
     volume30d,
     productBreakdown,
     dailyVolume,
     transactions,
-    payrollRuns: [],
+    payrollRuns,
     payrollTemplates: [],
     sampleRecipients: [],
     tiplinks: [],
-    giftCards: [],
+    giftCards,
     invoices,
-    complianceReports: [],
-    viewingKeys: [],
+    complianceReports,
+    viewingKeys,
+    scopedViewingKeys,
     team,
     notifications,
   };
@@ -287,8 +519,8 @@ export async function GET(request: NextRequest) {
       currency: s.currency,
       privacy: "shielded",
       status: s.status,
-      orders30d: orders.filter((o) => o.createdAt.getTime() >= from30d).length,
-      revenue30d: orders.reduce((sum, o) => sum + Number(o.totalAmount) / 1_000_000, 0),
+      orders30d: confirmedOrders.filter((o) => o.createdAt.getTime() >= from30d).length,
+      revenue30d: confirmedOrders.reduce((sum, o) => sum + Number(o.totalAmount) / 1_000_000, 0),
       createdAt: s.createdAt.getTime(),
     })),
   });

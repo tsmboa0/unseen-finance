@@ -24,6 +24,8 @@ export type MerchantProfile = {
   webhookUrl: string | null;
   umbraRegistered: boolean;
   umbraRegisteredAt: string | null;
+  payrollPrivySignerConsentAt: string | null;
+  payrollPrivySignerValidUntil: string | null;
   onboardingCompletedAt: string | null;
   createdAt: string;
 };

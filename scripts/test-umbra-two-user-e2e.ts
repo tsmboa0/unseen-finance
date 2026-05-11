@@ -40,6 +40,7 @@ import {
   getUmbraRelayer,
   getUserAccountQuerierFunction,
   getUserRegistrationFunction,
+  getSelfClaimableUtxoToPublicBalanceClaimerFunction,
 } from "@umbra-privacy/sdk";
 import { isRegistrationError } from "@umbra-privacy/sdk/errors";
 import {

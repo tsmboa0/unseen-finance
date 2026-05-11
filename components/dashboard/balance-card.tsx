@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useEffect } from "react";
+import { useCallback, useMemo, useState, useEffect } from "react";
 import { usePrivy } from "@privy-io/react-auth";
 import { getSolBalance, getTokenBalance } from "@/lib/solana";
 import { DBadge, DButton, DModal, DInput, DSelect } from "@/components/dashboard/primitives";
@@ -43,27 +43,34 @@ function buildHistorySeries(args: {
   mode: BalanceTab;
 }): number[] {
   const { points, currentTotal, mode } = args;
-  const minPoints = 10;
-  if (points.length === 0) return Array.from({ length: minPoints }, () => currentTotal);
+  const N = 30; // number of data points to display
 
+  // Use daily activity values (not cumulative).
+  // This means any transaction on any day creates a visible spike,
+  // regardless of wallet balance.
   const raw = points.map((p) =>
-    mode === "public" ? p.inflow - p.outflow : p.shielded,
+    mode === "public"
+      ? p.inflow + p.outflow   // show total daily activity volume
+      : p.shielded,
   );
-  const cumulative: number[] = [];
-  let running = 0;
-  for (const v of raw) {
-    running += v;
-    cumulative.push(running);
-  }
-  const first = cumulative[0] ?? 0;
-  const normalized = cumulative.map((v) => v - first);
-  const last = normalized[normalized.length - 1] ?? 0;
-  const offset = currentTotal - last;
-  const shifted = normalized.map((v) => v + offset);
 
-  if (shifted.length >= minPoints) return shifted;
-  const pad = Array.from({ length: minPoints - shifted.length }, () => shifted[0] ?? currentTotal);
-  return [...pad, ...shifted];
+  // Pad the left with zeros so recent data always sits on the right side.
+  const padded: number[] =
+    raw.length >= N
+      ? raw.slice(-N)
+      : [...Array(N - raw.length).fill(0), ...raw];
+
+  const hasActivity = padded.some((v) => v > 0);
+
+  if (!hasActivity) {
+    // No transaction records yet.
+    // Return a placeholder value > 0 so the chart renders a centered
+    // flat line instead of the bottom-of-chart artefact.
+    const base = Math.max(currentTotal, 1);
+    return padded.map(() => base);
+  }
+
+  return padded;
 }
 
 function BalanceLineChart({ data, mode }: { data: number[]; mode: BalanceTab }) {
@@ -72,11 +79,18 @@ function BalanceLineChart({ data, mode }: { data: number[]; mode: BalanceTab }) 
   const pad = 10;
   const max = Math.max(...data);
   const min = Math.min(...data);
-  const span = Math.max(max - min, 1);
+  const isFlat = max === min;
+  // When all values are equal, give a small artificial span so the line
+  // renders at the vertical midpoint rather than the bottom of the chart.
+  const span = isFlat ? Math.max(max, 1) : max - min;
   const step = (width - pad * 2) / Math.max(data.length - 1, 1);
+  const midY = pad + (height - pad * 2) / 2;
   const points = data.map((value, index) => {
     const x = pad + index * step;
-    const y = pad + (1 - (value - min) / span) * (height - pad * 2);
+    // If all values are the same, draw the line at the vertical centre.
+    const y = isFlat
+      ? midY
+      : pad + (1 - (value - min) / span) * (height - pad * 2);
     return [x, y] as const;
   });
   const linePath = points.reduce((path, [x, y], index) => {
@@ -168,39 +182,39 @@ export function BalanceCard() {
     claimAll,
   } = useUmbraPrivateActions();
 
-  useEffect(() => {
-    const walletAddress = user?.wallet?.address;
+  const walletAddress = user?.wallet?.address;
+
+  const fetchBalances = useCallback(async () => {
     if (!walletAddress) return;
+    const USDC_MINT = "4oG4sjmopf5MzvTHLE8rpVJ2uyczxfsw2K84SUTpNDx7";
+    const USDT_MINT = "DXQwBNGgyQ2BzGWxEriJPVmXYFQBsQbXvfvfSNTaJkL6";
+    const [sol, usdc, usdt] = await Promise.all([
+      getSolBalance(walletAddress),
+      getTokenBalance(walletAddress, USDC_MINT),
+      getTokenBalance(walletAddress, USDT_MINT),
+    ]);
+    const solPrice = 170;
+    setRealBalances([
+      { currency: "SOL", amount: sol, usdValue: sol * solPrice },
+      { currency: "USDC", amount: usdc, usdValue: usdc },
+      { currency: "USDT", amount: usdt, usdValue: usdt },
+    ]);
+  }, [walletAddress]);
 
-    let isMounted = true;
-    async function fetchBalances() {
-      const USDC_MINT = "4oG4sjmopf5MzvTHLE8rpVJ2uyczxfsw2K84SUTpNDx7";
-      const USDT_MINT = "DXQwBNGgyQ2BzGWxEriJPVmXYFQBsQbXvfvfSNTaJkL6";
+  // Poll on-chain balances every 15s
+  useEffect(() => {
+    void fetchBalances();
+    const interval = setInterval(() => void fetchBalances(), 15_000);
+    return () => clearInterval(interval);
+  }, [fetchBalances]);
 
-      const [sol, usdc, usdt] = await Promise.all([
-        getSolBalance(walletAddress!),
-        getTokenBalance(walletAddress!, USDC_MINT),
-        getTokenBalance(walletAddress!, USDT_MINT)
-      ]);
-
-      if (!isMounted) return;
-
-      const solPrice = 170;
-
-      setRealBalances([
-        { currency: "SOL", amount: sol, usdValue: sol * solPrice },
-        { currency: "USDC", amount: usdc, usdValue: usdc },
-        { currency: "USDT", amount: usdt, usdValue: usdt },
-      ]);
-    }
-
-    fetchBalances();
-    const interval = setInterval(fetchBalances, 15000);
-    return () => {
-      isMounted = false;
-      clearInterval(interval);
-    };
-  }, [user?.wallet?.address]);
+  // Also re-fetch immediately whenever an action changes balances (claim, shield, unshield)
+  // This avoids waiting up to 15s for the balance to reflect the change.
+  useEffect(() => {
+    const onBalanceRefresh = () => void fetchBalances();
+    window.addEventListener("balance:refresh", onBalanceRefresh);
+    return () => window.removeEventListener("balance:refresh", onBalanceRefresh);
+  }, [fetchBalances]);
 
   useEffect(() => {
     if (activeTab === "public" && publicTransferMode === "utxo" && transferCurrency === "SOL") {
@@ -934,7 +948,8 @@ const balanceCardCSS = `
   align-items: stretch;
   display: grid;
   gap: 14px;
-  grid-template-columns: minmax(210px, 0.72fr) minmax(260px, 1fr);
+  /* chart takes remaining space; total pane has a min so it doesn't shrink too small */
+  grid-template-columns: minmax(160px, 0.7fr) minmax(0, 1fr);
   padding: 0 18px 12px;
 }
 
@@ -1322,7 +1337,20 @@ const balanceCardCSS = `
   }
 }
 
+/* When the balance row stacks (≤1024px), the card can be wider but the
+   hero section may still be too cramped — stack chart below at ≤740px */
+@media (max-width: 740px) {
+  .balance-card__hero {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+}
+
 @media (max-width: 520px) {
+  .balance-card {
+    min-width: 0;
+  }
+
   .balance-card__header {
     align-items: flex-start;
     flex-direction: column;
@@ -1336,10 +1364,9 @@ const balanceCardCSS = `
     flex: 1;
   }
 
-  .balance-card__hero,
   .balance-card__tokens,
   .balance-card__private-stats {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .balance-card__micro {

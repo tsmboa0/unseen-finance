@@ -32,14 +32,42 @@ import {
   getPublicBalanceToEncryptedBalanceDirectDepositorFunction,
   getPublicBalanceToReceiverClaimableUtxoCreatorFunction,
   getReceiverClaimableUtxoToEncryptedBalanceClaimerFunction,
+  getComplianceGrantIssuerFunction,
+  getComplianceGrantRevokerFunction,
+  getUserComplianceGrantQuerierFunction,
+  getUserAccountQuerierFunction,
   getUmbraClient,
   getUmbraRelayer,
 } from "@umbra-privacy/sdk";
+import {
+  getDailyViewingKeyDeriver,
+  getHourlyViewingKeyDeriver,
+  getMintViewingKeyDeriver,
+  getMinuteViewingKeyDeriver,
+  getMonthlyViewingKeyDeriver,
+  getSecondViewingKeyDeriver,
+  getYearlyViewingKeyDeriver,
+} from "@umbra-privacy/sdk/crypto";
+import {
+  assertDay,
+  assertHour,
+  assertMinute,
+  assertMonth,
+  assertSecond,
+  assertYear,
+} from "@umbra-privacy/sdk/types";
 import {
   getCreateReceiverClaimableUtxoFromEncryptedBalanceProver,
   getCreateReceiverClaimableUtxoFromPublicBalanceProver,
   getClaimReceiverClaimableUtxoIntoEncryptedBalanceProver,
 } from "@umbra-privacy/web-zk-prover";
+import { useMerchantApi } from "@/hooks/use-merchant-api";
+import { getDefaultSolanaEndpoints, getDefaultUmbraIndexerUrl, getDefaultUmbraRelayerUrl } from "@/lib/solana-endpoints";
+import { umbraViewingKeyFieldToHex } from "@/lib/compliance/viewing-key-hex";
+import { hex64ToX25519PublicKey, randomRcNonce, rcNonceFromDecimal } from "@/lib/compliance/umbra-keys";
+import type { ScopedViewingKeyScope } from "@/lib/dashboard-types";
+import { createUmbraLocalMasterSeedStorage } from "@/lib/umbra/master-seed-storage";
+import { createUmbraSignerFromPrivyWallet } from "@/lib/umbra/privy-signer";
 
 type UTXO = {
   id: string;
@@ -50,10 +78,6 @@ type UTXO = {
   sender: string;
   status: "claimable" | "claiming" | "claimed";
 };
-import { useMerchantApi } from "@/hooks/use-merchant-api";
-import { getDefaultSolanaEndpoints, getDefaultUmbraIndexerUrl, getDefaultUmbraRelayerUrl } from "@/lib/solana-endpoints";
-import { createUmbraLocalMasterSeedStorage } from "@/lib/umbra/master-seed-storage";
-import { createUmbraSignerFromPrivyWallet } from "@/lib/umbra/privy-signer";
 
 type Currency = "USDC" | "USDT" | "SOL";
 type TokenBalance = { currency: Currency; amount: number; usdValue: number };
@@ -61,6 +85,17 @@ type PrivateTransferType = "encrypted" | "utxo";
 type PublicTransferMode = "normal" | "utxo";
 type UtxoStatus = UTXO["status"];
 type ClaimableUtxo = UTXO & { status: UtxoStatus; claimableData?: unknown };
+export type DeriveScopedViewingKeyArgs = {
+  mint: string;
+  scope: ScopedViewingKeyScope;
+  year?: number;
+  month?: number;
+  day?: number;
+  hour?: number;
+  minute?: number;
+  second?: number;
+};
+
 type DbUtxoRow = {
   id: string;
   treeIndex: number;
@@ -201,6 +236,14 @@ function sleep(ms: number): Promise<void> {
 function emitDashboardRefresh() {
   if (typeof window === "undefined") return;
   window.dispatchEvent(new Event("dashboard:refresh"));
+}
+
+// Emitted after actions that only change on-chain token balances (e.g. UTXO
+// claims, shield, unshield). This triggers only the RPC balance refresh in
+// the balance card — not the full analytics re-fetch.
+function emitBalanceRefresh() {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new Event("balance:refresh"));
 }
 
 function claimableRowFromScanData(claimableData: unknown, fallbackIndex: number): ClaimableUtxo {
@@ -586,9 +629,40 @@ export function useUmbraPrivateActions() {
         memo: "Shield from public balance",
       });
       await refreshPrivateBalances();
+      emitBalanceRefresh();
       setActionError(null);
     },
     [getPrivyTokenOrRedirect, logDashboardEvent, refreshPrivateBalances, withUmbraClient],
+  );
+
+  /** Move tokens from employer's public SPL balance into `destinationAddress`'s encrypted balance (ETA). */
+  const depositPublicToRecipientEta = useCallback(
+    async (destinationAddress: string, currency: Exclude<Currency, "SOL">, amount: string) => {
+      if (!canUseUmbraActions) {
+        throw new Error("Complete Umbra registration and ensure your wallet is synced before payroll.");
+      }
+      const mint = DEVNET_MINTS[currency];
+      const rawAmount = toRawUnits(amount, TOKEN_DECIMALS[currency]);
+      if (rawAmount <= BigInt(0)) throw new Error("Enter a valid amount.");
+      const dest = destinationAddress.trim();
+      if (!dest) throw new Error("Destination address is required.");
+
+      let txSignature: string | null = null;
+      await withUmbraClient(async (client) => {
+        const deposit = getPublicBalanceToEncryptedBalanceDirectDepositorFunction({ client });
+        const result = await deposit(dest as never, mint as never, rawAmount as never);
+        const q = result.queueSignature;
+        const c = result.callbackSignature;
+        txSignature =
+          (typeof c === "string" && c.length > 0 ? c : null) ??
+          (typeof q === "string" && q.length > 0 ? q : null);
+      });
+      await refreshPrivateBalances();
+      emitBalanceRefresh();
+      setActionError(null);
+      return { txSignature };
+    },
+    [canUseUmbraActions, refreshPrivateBalances, withUmbraClient],
   );
 
   const unshieldToPublic = useCallback(
@@ -614,6 +688,7 @@ export function useUmbraPrivateActions() {
         memo: "Unshield to public balance",
       });
       await refreshPrivateBalances();
+      emitBalanceRefresh();
       setActionError(null);
     },
     [getPrivyTokenOrRedirect, logDashboardEvent, refreshPrivateBalances, withUmbraClient],
@@ -761,6 +836,8 @@ export function useUmbraPrivateActions() {
           }
         }
         await refreshClaimableUtxos();
+        // Notify the balance card to immediately re-fetch on-chain RPC balances
+        emitBalanceRefresh();
         setActionError(null);
       } catch (e) {
         const msg = e instanceof Error ? e.message : "Claim failed.";
@@ -939,6 +1016,167 @@ export function useUmbraPrivateActions() {
     [getPrivyTokenOrRedirect, logDashboardEvent, merchant, privySolanaWallet, withUmbraClient],
   );
 
+  const createComplianceGrantTx = useCallback(
+    async (args: { receiverAddress: string; receiverX25519Hex: string }) => {
+      const wallet = merchant?.walletAddress;
+      if (!wallet) throw new Error("No merchant wallet.");
+      const dest = address(args.receiverAddress.trim());
+      const receiverPk = hex64ToX25519PublicKey(args.receiverX25519Hex);
+      const { nonceDecimal, rcNonce } = randomRcNonce();
+
+      const txSignature = await withUmbraClient(async (client) => {
+        const queryUser = getUserAccountQuerierFunction({ client });
+        const acc = await queryUser(address(wallet));
+        if (acc.state !== "exists") throw new Error("Umbra encrypted user account not found.");
+        const granterPk = acc.data.x25519PublicKey;
+        const issue = getComplianceGrantIssuerFunction({ client });
+        return issue(dest, granterPk, receiverPk, rcNonce);
+      });
+
+      return {
+        txSignature: String(txSignature),
+        nonceDecimal,
+        receiverWallet: args.receiverAddress.trim(),
+        receiverX25519Hex: args.receiverX25519Hex.trim().replace(/^0x/i, "").toLowerCase(),
+      };
+    },
+    [merchant?.walletAddress, withUmbraClient],
+  );
+
+  const revokeComplianceGrantTx = useCallback(
+    async (args: { receiverAddress: string; receiverX25519Hex: string; nonceDecimal: string }) => {
+      const wallet = merchant?.walletAddress;
+      if (!wallet) throw new Error("No merchant wallet.");
+      const dest = address(args.receiverAddress.trim());
+      const receiverPk = hex64ToX25519PublicKey(args.receiverX25519Hex);
+      const rcNonce = rcNonceFromDecimal(args.nonceDecimal);
+
+      const txSignature = await withUmbraClient(async (client) => {
+        const queryUser = getUserAccountQuerierFunction({ client });
+        const acc = await queryUser(address(wallet));
+        if (acc.state !== "exists") throw new Error("Umbra encrypted user account not found.");
+        const granterPk = acc.data.x25519PublicKey;
+        const revoke = getComplianceGrantRevokerFunction({ client });
+        return revoke(dest, granterPk, receiverPk, rcNonce);
+      });
+
+      return { txSignature: String(txSignature) };
+    },
+    [merchant?.walletAddress, withUmbraClient],
+  );
+
+  const deriveScopedViewingKeyHex = useCallback(
+    async (args: DeriveScopedViewingKeyArgs): Promise<string> => {
+      return withUmbraClient(async (client) => {
+        const mintAddr = address(args.mint.trim());
+        switch (args.scope) {
+          case "mint": {
+            const gen = getMintViewingKeyDeriver({ client });
+            const vk = await gen(mintAddr);
+            return umbraViewingKeyFieldToHex(vk);
+          }
+          case "yearly": {
+            const yb = BigInt(args.year!);
+            assertYear(yb);
+            const gen = getYearlyViewingKeyDeriver({ client });
+            const vk = await gen(mintAddr, yb);
+            return umbraViewingKeyFieldToHex(vk);
+          }
+          case "monthly": {
+            const yb = BigInt(args.year!);
+            const mb = BigInt(args.month!);
+            assertYear(yb);
+            assertMonth(mb);
+            const gen = getMonthlyViewingKeyDeriver({ client });
+            const vk = await gen(mintAddr, yb, mb);
+            return umbraViewingKeyFieldToHex(vk);
+          }
+          case "daily": {
+            const yb = BigInt(args.year!);
+            const mb = BigInt(args.month!);
+            const db = BigInt(args.day!);
+            assertYear(yb);
+            assertMonth(mb);
+            assertDay(db);
+            const gen = getDailyViewingKeyDeriver({ client });
+            const vk = await gen(mintAddr, yb, mb, db);
+            return umbraViewingKeyFieldToHex(vk);
+          }
+          case "hourly": {
+            const yb = BigInt(args.year!);
+            const mb = BigInt(args.month!);
+            const db = BigInt(args.day!);
+            const hb = BigInt(args.hour!);
+            assertYear(yb);
+            assertMonth(mb);
+            assertDay(db);
+            assertHour(hb);
+            const gen = getHourlyViewingKeyDeriver({ client });
+            const vk = await gen(mintAddr, yb, mb, db, hb);
+            return umbraViewingKeyFieldToHex(vk);
+          }
+          case "minute": {
+            const yb = BigInt(args.year!);
+            const mb = BigInt(args.month!);
+            const db = BigInt(args.day!);
+            const hb = BigInt(args.hour!);
+            const minb = BigInt(args.minute!);
+            assertYear(yb);
+            assertMonth(mb);
+            assertDay(db);
+            assertHour(hb);
+            assertMinute(minb);
+            const gen = getMinuteViewingKeyDeriver({ client });
+            const vk = await gen(mintAddr, yb, mb, db, hb, minb);
+            return umbraViewingKeyFieldToHex(vk);
+          }
+          case "second": {
+            const yb = BigInt(args.year!);
+            const mb = BigInt(args.month!);
+            const db = BigInt(args.day!);
+            const hb = BigInt(args.hour!);
+            const minb = BigInt(args.minute!);
+            const sb = BigInt(args.second!);
+            assertYear(yb);
+            assertMonth(mb);
+            assertDay(db);
+            assertHour(hb);
+            assertMinute(minb);
+            assertSecond(sb);
+            const gen = getSecondViewingKeyDeriver({ client });
+            const vk = await gen(mintAddr, yb, mb, db, hb, minb, sb);
+            return umbraViewingKeyFieldToHex(vk);
+          }
+          default: {
+            const _x: never = args.scope;
+            throw new Error(`Unsupported viewing key scope: ${_x}`);
+          }
+        }
+      });
+    },
+    [withUmbraClient],
+  );
+
+  const queryComplianceGrantOnChain = useCallback(
+    async (args: { receiverX25519Hex: string; nonceDecimal: string }) => {
+      const wallet = merchant?.walletAddress;
+      if (!wallet) throw new Error("No merchant wallet.");
+      const receiverPk = hex64ToX25519PublicKey(args.receiverX25519Hex);
+      const rcNonce = rcNonceFromDecimal(args.nonceDecimal);
+
+      return withUmbraClient(async (client) => {
+        const queryUser = getUserAccountQuerierFunction({ client });
+        const acc = await queryUser(address(wallet));
+        if (acc.state !== "exists") throw new Error("Umbra encrypted user account not found.");
+        const granterPk = acc.data.x25519PublicKey;
+        const queryGrant = getUserComplianceGrantQuerierFunction({ client });
+        const result = await queryGrant(granterPk, rcNonce, receiverPk);
+        return result.state === "exists";
+      });
+    },
+    [merchant?.walletAddress, withUmbraClient],
+  );
+
   return {
     privateBalances,
     utxos,
@@ -951,10 +1189,15 @@ export function useUmbraPrivateActions() {
     refreshPrivateBalances,
     refreshClaimableUtxos,
     shieldFromPublic,
+    depositPublicToRecipientEta,
     unshieldToPublic,
     transferFromPrivate,
     transferFromPublic,
     claimOne,
     claimAll,
+    createComplianceGrantTx,
+    revokeComplianceGrantTx,
+    queryComplianceGrantOnChain,
+    deriveScopedViewingKeyHex,
   };
 }

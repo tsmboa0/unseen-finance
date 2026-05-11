@@ -53,10 +53,18 @@ export type PayrollRun = {
   category: "Contractors" | "Employees" | "Advisors" | "Partners";
   recipientCount: number;
   total: number;
-  currency: "USDC";
-  status: "scheduled" | "running" | "settled" | "failed";
+  currency: "USDC" | "USDT";
+  /** Lifecycle includes server-delegation runs (draft → awaiting_delegation → processing → terminal). */
+  status:
+    | "draft"
+    | "awaiting_delegation"
+    | "processing"
+    | "completed"
+    | "partial"
+    | "failed";
   scheduledFor: number;
   completedAt?: number;
+  successCount?: number;
 };
 
 export type Recipient = {
@@ -80,12 +88,15 @@ export type Tiplink = {
 
 export type GiftCard = {
   id: string;
-  recipient: string;
+  memo: string;
   amount: number;
   currency: "USDC";
-  status: "active" | "redeemed" | "expired";
+  status: "active" | "redeemed" | "expired" | "pending" | "failed";
   createdAt: number;
+  /** Short internal ref (id suffix). */
   code: string;
+  /** Full redeemable code when issued; null while still awaiting funding. */
+  claimCode: string | null;
 };
 
 export type Invoice = {
@@ -94,10 +105,12 @@ export type Invoice = {
   client: string;
   email: string;
   amount: number;
-  currency: "USDC";
+  currency: "USDC" | "USDT";
   status: "draft" | "sent" | "paid" | "overdue";
   issuedAt: number;
   dueAt: number;
+  paymentId: string | null;
+  checkoutUrl: string | null;
 };
 
 export type ComplianceReport = {
@@ -109,6 +122,8 @@ export type ComplianceReport = {
   generatedAt: number;
   status: "ready" | "generating" | "expired";
   size: string;
+  /** Authenticated PDF download path (relative to app origin). */
+  pdfPath: string;
 };
 
 export type ViewingKey = {
@@ -119,6 +134,40 @@ export type ViewingKey = {
   createdAt: number;
   expiresAt: number;
   shares: number;
+  /** Maps to persisted Umbra compliance grant when present. */
+  grantStatus?: "active" | "revoked";
+  receiverWallet?: string;
+  receiverX25519Hex?: string;
+  nonceDecimal?: string;
+  onChainGrantExists?: boolean | null;
+  lastChainCheckAt?: number | null;
+  createTxSignature?: string | null;
+  revokeTxSignature?: string | null;
+};
+
+/** Umbra Poseidon viewing key scope (mint- and UTC calendar–scoped). */
+export type ScopedViewingKeyScope =
+  | "mint"
+  | "yearly"
+  | "monthly"
+  | "daily"
+  | "hourly"
+  | "minute"
+  | "second";
+
+export type ScopedViewingKey = {
+  id: string;
+  label: string;
+  scope: ScopedViewingKeyScope;
+  mintAddress: string;
+  year?: number;
+  month?: number;
+  day?: number;
+  hour?: number;
+  minute?: number;
+  second?: number;
+  keyHex: string;
+  createdAt: number;
 };
 
 export type TeamMember = {
@@ -148,6 +197,13 @@ export type DashboardOverview = {
     activeCustomersDelta: number;
     avgSettlementMs: number;
     avgSettlementDelta: number;
+    // Product-level counts (all-time)
+    gatewayTxns: number;
+    payrollTxns: number;
+    storefrontOrders: number;
+    newStorefrontOrders: number;  // confirmed in last 48h
+    tiplinksTotal: number;
+    invoicesTotal: number;
   };
   volume30d: Volume30dPoint[];
   productBreakdown: ProductBreakdown[];
@@ -161,6 +217,8 @@ export type DashboardOverview = {
   invoices: Invoice[];
   complianceReports: ComplianceReport[];
   viewingKeys: ViewingKey[];
+  /** Locally derived Umbra BN254 viewing keys (dashboard export only). */
+  scopedViewingKeys: ScopedViewingKey[];
   team: TeamMember[];
   notifications: NotificationItem[];
 };

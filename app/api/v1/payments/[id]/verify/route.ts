@@ -3,6 +3,7 @@ import prisma from "@/lib/db";
 import { requireApiKey, notFound } from "@/lib/auth";
 import { verifyTransactions } from "@/lib/solana";
 import { serializePayment, getMintInfo, isExpired, signWebhookPayload } from "@/lib/utils";
+import { syncMerchantInvoicePaidForPayment } from "@/lib/payments/sync-merchant-invoice-paid";
 
 // ─── POST /api/v1/payments/:id/verify ────────────────────────────────────────
 //
@@ -167,6 +168,8 @@ export async function POST(request: NextRequest, { params }: Params) {
       txSignature: verifyResult.confirmedSignature ?? payment.txSignature,
     },
   });
+
+  await syncMerchantInvoicePaidForPayment(id);
 
   // ─── Fire webhook (fire-and-forget) ───────────────────────────────────────
   const webhookUrl = payment.webhookUrl ?? merchant.webhookUrl;
