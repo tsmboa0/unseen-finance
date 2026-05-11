@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import { SiteShell } from "@/components/unseen/site-shell";
+import { UNSEEN_DOCS_URL } from "@/lib/docs-url";
 
 export function PlaceholderPage({
   eyebrow,
@@ -29,7 +30,12 @@ export function PlaceholderPage({
           <p>{description}</p>
 
           <div className="placeholder-page__actions">
-            <Link className="primary-link" href="/signup">
+            <Link
+              className="primary-link"
+              href={UNSEEN_DOCS_URL}
+              rel="noopener noreferrer"
+              target="_blank"
+            >
               <span className="primary-link__label">Start Building</span>
               <ArrowRight aria-hidden="true" className="button-arrow" size={16} />
             </Link>

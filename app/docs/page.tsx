@@ -1,16 +1,6 @@
-import type { Metadata } from "next";
-import { PlaceholderPage } from "@/components/unseen/placeholder-page";
-
-export const metadata: Metadata = {
-  title: "Documentation",
-};
+import { permanentRedirect } from "next/navigation";
+import { UNSEEN_DOCS_URL } from "@/lib/docs-url";
 
 export default function DocsPage() {
-  return (
-    <PlaceholderPage
-      description="Guides, API references, SDK examples, and launch checklists for shielded Solana payment flows."
-      eyebrow="Documentation"
-      title="Developer docs are on the way."
-    />
-  );
+  permanentRedirect(UNSEEN_DOCS_URL);
 }

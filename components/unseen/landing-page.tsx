@@ -26,6 +26,7 @@ import {
   useState,
 } from "react";
 import { SiteShell } from "@/components/unseen/site-shell";
+import { UNSEEN_DOCS_URL } from "@/lib/docs-url";
 import { usePrivy } from "@privy-io/react-auth";
 import { useRouter } from "next/navigation";
 
@@ -480,7 +481,7 @@ export function LandingPage() {
   }, [reducedMotion]);
 
   return (
-    <SiteShell>
+    <SiteShell className="unseen-site-root--landing">
       <main className="landing-page">
         <AuroraBackdrop />
 
@@ -547,7 +548,12 @@ export function LandingPage() {
                   <span className="primary-link__label">Explore the Gateway</span>
                   <ArrowRight aria-hidden="true" className="button-arrow" size={16} />
                 </Link>
-                <Link className="hero-docs-link" href="/docs">
+                <Link
+                  className="hero-docs-link"
+                  href={UNSEEN_DOCS_URL}
+                  rel="noopener noreferrer"
+                  target="_blank"
+                >
                   Read the Docs
                 </Link>
               </m.div>
@@ -773,7 +779,12 @@ export function LandingPage() {
                 </div>
               </div>
 
-              <Link className="developer-docs-cta" href="/docs">
+              <Link
+                className="developer-docs-cta"
+                href={UNSEEN_DOCS_URL}
+                rel="noopener noreferrer"
+                target="_blank"
+              >
                 <span>$ unseen docs open</span>
                 <span className="developer-docs-cta__icon">→</span>
               </Link>
@@ -853,7 +864,12 @@ export function LandingPage() {
               <span className="hero-heading__accent">Has Nothing to Hide.</span>
             </h2>
             <div className="final-cta__actions">
-              <Link className="primary-link primary-link--hero" href="/signup">
+              <Link
+                className="primary-link primary-link--hero"
+                href={UNSEEN_DOCS_URL}
+                rel="noopener noreferrer"
+                target="_blank"
+              >
                 <span className="primary-link__label">Read Docs</span>
                 <ArrowRight aria-hidden="true" className="button-arrow" size={16} />
               </Link>

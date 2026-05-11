@@ -1,3 +1,5 @@
+import { UNSEEN_DOCS_URL } from "@/lib/docs-url";
+
 export const productPages = {
   gateway: {
     label: "Gateway",
@@ -49,9 +51,9 @@ export const PRODUCT_SLUGS = Object.keys(productPages) as ProductSlug[];
 
 export const pageLinks = [
   { label: "Explore Gateway", href: "/products/gateway" },
-  { label: "Read Documentation", href: "/docs" },
+  { label: "Read Documentation", href: UNSEEN_DOCS_URL },
   { label: "View Pricing", href: "/pricing" },
-  { label: "Start Building", href: "/docs" },
+  { label: "Start Building", href: UNSEEN_DOCS_URL },
   { label: "Contact Sales", href: "/pricing" },
   { label: "System Status", href: "https://status.unseenfi.com" },
 ] as const;

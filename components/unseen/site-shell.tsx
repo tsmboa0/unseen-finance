@@ -45,6 +45,7 @@ import { usePrivy } from "@privy-io/react-auth";
 import { UnseenLogo } from "@/components/unseen/logo";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { pageLinks } from "@/components/unseen/site-content";
+import { UNSEEN_DOCS_URL } from "@/lib/docs-url";
 
 type MenuItem = {
   description: string;
@@ -108,7 +109,7 @@ const solutionMenu: MenuItem[] = [
   {
     title: "For Developers",
     description: "SDK, APIs, and developer tools",
-    href: "/docs",
+    href: UNSEEN_DOCS_URL,
     icon: Code2,
   },
   {
@@ -129,10 +130,10 @@ const companyLinks = [
 ] as const;
 
 const developerLinks = [
-  { href: "/docs", label: "Documentation" },
-  { href: "/docs", label: "SDK Reference" },
+  { href: UNSEEN_DOCS_URL, label: "Documentation", external: true },
+  { href: UNSEEN_DOCS_URL, label: "SDK Reference", external: true },
   { href: "https://github.com", label: "GitHub", external: true },
-  { href: "/docs", label: "Changelog" },
+  { href: UNSEEN_DOCS_URL, label: "Changelog", external: true },
   { href: "https://status.unseenfi.com", label: "Status", external: true },
 ] as const;
 
@@ -157,7 +158,7 @@ const paletteGroups = [
     items: [
       {
         label: "Start Building",
-        href: "/signup",
+        href: UNSEEN_DOCS_URL,
         icon: ArrowRight,
       },
       {
@@ -176,11 +177,14 @@ const paletteGroups = [
 
 export function SiteShell({
   children,
+  className,
   footerMode = "default",
   headerVariant = "default",
   footerVariant = "default",
 }: {
   children: ReactNode;
+  /** Merged onto `.unseen-site-root` (wraps nav + page body; use for page-specific nav tweaks). */
+  className?: string;
   footerMode?: "default" | "compact";
   /** Minimal: logo + theme only (e.g. auditor tool). */
   headerVariant?: "default" | "minimal";
@@ -205,10 +209,14 @@ export function SiteShell({
       <ScrollProgress />
       <Cursor active={stage >= 1} />
       {headerVariant === "default" ? <CommandPalette /> : null}
-      <Navbar stage={stage} variant={headerVariant} />
-      <div className="unseen-site-shell">
-        {children}
-        <Footer mode={footerMode} variant={footerVariant} />
+      <div
+        className={["unseen-site-root", className].filter(Boolean).join(" ")}
+      >
+        <Navbar stage={stage} variant={headerVariant} />
+        <div className="unseen-site-shell">
+          {children}
+          <Footer mode={footerMode} variant={footerVariant} />
+        </div>
       </div>
     </LazyMotion>
   );
@@ -391,7 +399,13 @@ function Navbar({ stage, variant }: { stage: number; variant: "default" | "minim
               />
             </div>
 
-            <Link className="navbar-link" data-cursor-hover="true" href="/docs">
+            <Link
+              className="navbar-link"
+              data-cursor-hover="true"
+              href={UNSEEN_DOCS_URL}
+              rel="noopener noreferrer"
+              target="_blank"
+            >
               Developers
             </Link>
             <Link
@@ -423,7 +437,7 @@ function Navbar({ stage, variant }: { stage: number; variant: "default" | "minim
             >
               {ready && authenticated ? "Dashboard" : "Log in"}
             </button>
-            <PrimaryLink href="/signup">Start Building</PrimaryLink>
+            <PrimaryLink href={UNSEEN_DOCS_URL}>Start Building</PrimaryLink>
           </m.div>
 
           <button
@@ -484,7 +498,13 @@ function Navbar({ stage, variant }: { stage: number; variant: "default" | "minim
               </div>
               <div className="mobile-drawer-section">
                 <p className="mobile-drawer-label">Explore</p>
-                <Link className="mobile-drawer-link" href="/docs" onClick={closeDrawer}>
+                <Link
+                  className="mobile-drawer-link"
+                  href={UNSEEN_DOCS_URL}
+                  onClick={closeDrawer}
+                  rel="noopener noreferrer"
+                  target="_blank"
+                >
                   Developers
                 </Link>
                 <Link className="mobile-drawer-link" href="/pricing" onClick={closeDrawer}>
@@ -511,7 +531,7 @@ function Navbar({ stage, variant }: { stage: number; variant: "default" | "minim
                 >
                   {ready && authenticated ? "Dashboard" : "Log in"}
                 </button>
-                <PrimaryLink href="/signup" onClick={closeDrawer}>
+                <PrimaryLink href={UNSEEN_DOCS_URL} onClick={closeDrawer}>
                   Start Building
                 </PrimaryLink>
               </div>
@@ -547,8 +567,28 @@ function DropdownMenu({
           <div className="dropdown-list">
             {items.map((item) => {
               const Icon = item.icon;
+              const external = item.href.startsWith("http");
 
-              return (
+              return external ? (
+                <a
+                  className="dropdown-item"
+                  data-cursor-hover="true"
+                  href={item.href}
+                  key={item.href}
+                  rel="noreferrer"
+                  target="_blank"
+                >
+                  <span aria-hidden="true" className="dropdown-item__icon">
+                    <Icon size={16} />
+                  </span>
+                  <span className="dropdown-item__copy">
+                    <span className="dropdown-item__title">{item.title}</span>
+                    <span className="dropdown-item__description">
+                      {item.description}
+                    </span>
+                  </span>
+                </a>
+              ) : (
                 <Link
                   className="dropdown-item"
                   data-cursor-hover="true"
@@ -600,6 +640,8 @@ function PrimaryLink({
     }, 500);
   };
 
+  const external = href.startsWith("http");
+
   return (
     <Link
       className="primary-link"
@@ -607,6 +649,9 @@ function PrimaryLink({
       href={href}
       onClick={onClick}
       onPointerDown={onPointerDown}
+      {...(external
+        ? { rel: "noopener noreferrer", target: "_blank" as const }
+        : {})}
     >
       <span className="primary-link__label">{children}</span>
       <ArrowRight aria-hidden="true" className="button-arrow" size={16} />

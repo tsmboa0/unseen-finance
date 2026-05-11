@@ -30,7 +30,7 @@ function isStaticOrInternalPath(pathname: string): boolean {
   return false;
 }
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const base = storefrontBaseHost();
   if (!base) return NextResponse.next();
 
@@ -67,7 +67,7 @@ export const config = {
   matcher: [
     /*
      * Match all pathnames except Next internals and typical image assets (still
-     * allow /_next via early return in middleware).
+     * allow /_next via early return in proxy).
      */
     "/((?!_next/static|_next/image|_next/webpack-hmr).*)",
   ],
