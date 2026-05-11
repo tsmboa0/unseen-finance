@@ -23,6 +23,9 @@
 # misc
 .DS_Store
 *.pem
+# Solana / local key material (never commit)
+keypair*.json
+*-keypair*.json
 
 # debug
 npm-debug.log*
