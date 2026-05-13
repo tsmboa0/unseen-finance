@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/db";
-import { requirePrivyAuth } from "@/lib/privy";
+import { requirePrivyAuthForDashboard } from "@/lib/privy";
+import { dashboardApiRequireMerchant } from "@/lib/dashboard-api-auth";
 
 type CursorResponse = {
   treeIndex: number;
@@ -14,10 +15,10 @@ function coerceInt(value: unknown): number | null {
 }
 
 export async function GET(request: NextRequest) {
-  const { merchant, error } = await requirePrivyAuth(request as unknown as Request);
-  if (!merchant) {
-    return NextResponse.json({ error: error ?? "Unauthorized" }, { status: 401 });
-  }
+  const auth = await requirePrivyAuthForDashboard(request as unknown as Request);
+  const gate = dashboardApiRequireMerchant(auth);
+  if (gate instanceof NextResponse) return gate;
+  const { merchant } = gate;
   if (!merchant.walletAddress) {
     return NextResponse.json({ error: "No Solana wallet linked to this account" }, { status: 400 });
   }
@@ -50,10 +51,10 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const { merchant, error } = await requirePrivyAuth(request as unknown as Request);
-  if (!merchant) {
-    return NextResponse.json({ error: error ?? "Unauthorized" }, { status: 401 });
-  }
+  const auth = await requirePrivyAuthForDashboard(request as unknown as Request);
+  const gate = dashboardApiRequireMerchant(auth);
+  if (gate instanceof NextResponse) return gate;
+  const { merchant } = gate;
   if (!merchant.walletAddress) {
     return NextResponse.json({ error: "No Solana wallet linked to this account" }, { status: 400 });
   }

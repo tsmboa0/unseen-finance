@@ -4,7 +4,8 @@ import { Prisma } from "@prisma/client";
 import prisma from "@/lib/db";
 import { appBaseUrl } from "@/lib/invoice/app-base-url";
 import { invoicePayAbsoluteUrl } from "@/lib/invoice/invoice-pay-url";
-import { requirePrivyAuth } from "@/lib/privy";
+import { requirePrivyAuthForDashboard } from "@/lib/privy";
+import { dashboardApiRequireMerchant } from "@/lib/dashboard-api-auth";
 import type {
   ComplianceReport,
   DashboardOverview,
@@ -71,8 +72,10 @@ function startOfUtcDay(ts: number): number {
 }
 
 export async function GET(request: NextRequest) {
-  const { merchant, error } = await requirePrivyAuth(request as unknown as Request);
-  if (!merchant) return NextResponse.json({ error: error ?? "Unauthorized" }, { status: 401 });
+  const auth = await requirePrivyAuthForDashboard(request as unknown as Request);
+  const gate = dashboardApiRequireMerchant(auth);
+  if (gate instanceof NextResponse) return gate;
+  const { merchant } = gate;
 
   const merchantCreatedAt = merchant.createdAt.getTime();
   const now = Date.now();

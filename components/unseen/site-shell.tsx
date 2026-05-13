@@ -46,6 +46,10 @@ import { UnseenLogo } from "@/components/unseen/logo";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { pageLinks } from "@/components/unseen/site-content";
 import { UNSEEN_DOCS_URL } from "@/lib/docs-url";
+import {
+  BetaLoginGateProvider,
+  useBetaPendingRedirectRef,
+} from "@/components/beta/beta-login-gate-provider";
 
 type MenuItem = {
   description: string;
@@ -209,15 +213,17 @@ export function SiteShell({
       <ScrollProgress />
       <Cursor active={stage >= 1} />
       {headerVariant === "default" ? <CommandPalette /> : null}
-      <div
-        className={["unseen-site-root", className].filter(Boolean).join(" ")}
-      >
-        <Navbar stage={stage} variant={headerVariant} />
-        <div className="unseen-site-shell">
-          {children}
-          <Footer mode={footerMode} variant={footerVariant} />
+      <BetaLoginGateProvider>
+        <div
+          className={["unseen-site-root", className].filter(Boolean).join(" ")}
+        >
+          <Navbar stage={stage} variant={headerVariant} />
+          <div className="unseen-site-shell">
+            {children}
+            <Footer mode={footerMode} variant={footerVariant} />
+          </div>
         </div>
-      </div>
+      </BetaLoginGateProvider>
     </LazyMotion>
   );
 }
@@ -233,16 +239,7 @@ function Navbar({ stage, variant }: { stage: number; variant: "default" | "minim
   const reducedMotion = useReducedMotion();
   const { login, ready, authenticated } = usePrivy();
   const router = useRouter();
-  const pendingRedirect = useRef(false);
-
-  // Redirect to dashboard once login completes — only when the user
-  // explicitly called login() in this session, not on every page visit.
-  useEffect(() => {
-    if (ready && authenticated && pendingRedirect.current) {
-      pendingRedirect.current = false;
-      router.replace("/dashboard");
-    }
-  }, [ready, authenticated, router]);
+  const pendingRedirect = useBetaPendingRedirectRef();
 
   const openDashboardOrLogin = () => {
     if (ready && authenticated) {

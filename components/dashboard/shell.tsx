@@ -25,8 +25,36 @@ import { type ReactNode, useState, useEffect, useRef } from "react";
 import { UnseenLogo } from "@/components/unseen/logo";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { formatRelativeTime } from "@/components/dashboard/formatters";
+import { BetaGateModal } from "@/components/beta/beta-gate-modal";
 import { useDashboardOverview } from "@/hooks/use-dashboard-overview";
+import { useDashboardBetaGate } from "@/hooks/use-dashboard-beta-gate";
 import { OnboardingFlow } from "@/components/dashboard/onboarding-flow";
+
+function DashAuthSpinner() {
+  return (
+    <div
+      style={{
+        minHeight: "100vh",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        background: "var(--color-bg-base)",
+      }}
+    >
+      <div
+        style={{
+          width: 32,
+          height: 32,
+          border: "3px solid rgba(123,47,255,0.2)",
+          borderTopColor: "#7b2fff",
+          borderRadius: "50%",
+          animation: "spin 0.8s linear infinite",
+        }}
+      />
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+    </div>
+  );
+}
 
 type NavItem = {
   label: string;
@@ -54,6 +82,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const { ready, authenticated } = usePrivy();
   const router = useRouter();
+  const { phase, blockedStep, setGateAllowed } = useDashboardBetaGate();
 
   // Redirect unauthenticated users to the landing page
   useEffect(() => {
@@ -64,23 +93,31 @@ export function DashboardShell({ children }: { children: ReactNode }) {
 
   // Show nothing while checking auth or redirecting
   if (!ready || !authenticated) {
+    return <DashAuthSpinner />;
+  }
+
+  if (phase === "loading") {
+    return <DashAuthSpinner />;
+  }
+
+  if (phase === "blocked") {
     return (
-      <div style={{
-        minHeight: "100vh",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        background: "var(--color-bg-base)",
-      }}>
-        <div style={{
-          width: 32, height: 32,
-          border: "3px solid rgba(123,47,255,0.2)",
-          borderTopColor: "#7b2fff",
-          borderRadius: "50%",
-          animation: "spin 0.8s linear infinite",
-        }} />
-        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-      </div>
+      <>
+        <BetaGateModal
+          allowBackdropClose={false}
+          initialStep={blockedStep}
+          open
+          onAccessGranted={setGateAllowed}
+          onOpenChange={() => {}}
+        />
+        <div
+          aria-hidden
+          style={{
+            minHeight: "100vh",
+            background: "var(--color-bg-base)",
+          }}
+        />
+      </>
     );
   }
 

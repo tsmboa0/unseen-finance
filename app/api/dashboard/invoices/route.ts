@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/db";
-import { requirePrivyAuth } from "@/lib/privy";
+import { requirePrivyAuthForDashboard } from "@/lib/privy";
+import { dashboardApiRequireMerchant } from "@/lib/dashboard-api-auth";
 import { normalizeLineItems, type InvoiceLineItemInput } from "@/lib/invoice/line-items";
 import { nextMerchantInvoiceNumber } from "@/lib/invoice/invoice-number";
 import { payrollStableMint, toPayrollRawUnits, type PayrollCurrency } from "@/lib/payroll/constants";
@@ -18,10 +19,10 @@ function isLikelyEmail(s: string): boolean {
 }
 
 export async function POST(request: NextRequest) {
-  const { merchant, error } = await requirePrivyAuth(request as unknown as Request);
-  if (!merchant) {
-    return NextResponse.json({ error: error ?? "Unauthorized" }, { status: 401 });
-  }
+  const auth = await requirePrivyAuthForDashboard(request as unknown as Request);
+  const gate = dashboardApiRequireMerchant(auth);
+  if (gate instanceof NextResponse) return gate;
+  const { merchant } = gate;
 
   let body: {
     action?: string;

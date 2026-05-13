@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/db";
-import { requirePrivyAuth } from "@/lib/privy";
+import { requirePrivyAuthForDashboard } from "@/lib/privy";
+import { dashboardApiRequireMerchant, dashboardApiUnauthorized } from "@/lib/dashboard-api-auth";
 
 function serializeMerchant(merchant: {
   id: string;
@@ -69,12 +70,12 @@ function getPrismaErrorTarget(error: unknown): string[] {
 // (including their API key for subsequent API calls).
 
 export async function GET(req: NextRequest) {
-  const { merchant, authUser, error } = await requirePrivyAuth(req as unknown as Request);
+  const auth = await requirePrivyAuthForDashboard(req as unknown as Request);
 
-  // Not authenticated at all
-  if (!authUser) {
-    return NextResponse.json({ error: error ?? "Unauthorized" }, { status: 401 });
-  }
+  const unauthorized = dashboardApiUnauthorized(auth);
+  if (unauthorized) return unauthorized;
+
+  const { merchant } = auth;
 
   // Authenticated but no merchant yet — needs to complete onboarding
   if (!merchant) {
@@ -85,11 +86,11 @@ export async function GET(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
-  const { merchant, error } = await requirePrivyAuth(req as unknown as Request);
+  const auth = await requirePrivyAuthForDashboard(req as unknown as Request);
 
-  if (!merchant) {
-    return NextResponse.json({ error: error ?? "Unauthorized" }, { status: 401 });
-  }
+  const gate = dashboardApiRequireMerchant(auth);
+  if (gate instanceof NextResponse) return gate;
+  const { merchant } = gate;
 
   let body: {
     name?: unknown;

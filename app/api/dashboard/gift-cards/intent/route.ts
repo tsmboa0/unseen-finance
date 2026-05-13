@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { randomBytes } from "node:crypto";
 import prisma from "@/lib/db";
-import { requirePrivyAuth } from "@/lib/privy";
+import { requirePrivyAuthForDashboard } from "@/lib/privy";
+import { dashboardApiRequireMerchant } from "@/lib/dashboard-api-auth";
 import { GIFT_MAX_FACE_RAW, GIFT_MIN_FACE_RAW, fundTotalRawForFace, giftMint, platformFeeRawForFace } from "@/lib/gift-cards/constants";
 import { giftAdminTokenAta, getGiftAdminSigner } from "@/lib/gift-cards/admin-wallet";
 import { toPayrollRawUnits } from "@/lib/payroll/constants";
@@ -11,8 +12,10 @@ const DEFAULT_VALIDITY_DAYS = 90;
 const MAX_MEMO = 500;
 
 export async function POST(request: Request) {
-  const { merchant, error } = await requirePrivyAuth(request);
-  if (!merchant) return NextResponse.json({ error: error ?? "Unauthorized" }, { status: 401 });
+  const auth = await requirePrivyAuthForDashboard(request);
+  const gate = dashboardApiRequireMerchant(auth);
+  if (gate instanceof NextResponse) return gate;
+  const { merchant } = gate;
 
   let body: { amount?: string; memo?: string; validityDays?: number };
   try {

@@ -451,3 +451,30 @@ model DashboardEvent {
   @@index([merchantId, createdAt])
   @@index([merchantId, category])
 }
+
+// ─── Closed beta program (admin tables — no relation to Merchant) ────────────
+// Approved emails that may use the merchant dashboard during private beta.
+
+model BetaProgramAllowlistEntry {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  note      String?
+  /// manual | access_request
+  source    String   @default("manual")
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("beta_program_allowlist")
+}
+
+/// Users who clicked “Request access” and are waiting for admin approval.
+model BetaProgramPendingAccess {
+  id          String   @id @default(cuid())
+  email       String   @unique
+  privyUserId String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("beta_program_pending_access")
+}

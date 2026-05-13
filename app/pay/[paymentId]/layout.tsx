@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 export const metadata: Metadata = {
   title: "Unseen Pay — Checkout",
   description: "Complete your private payment with Unseen Pay",
+  robots: { index: false, follow: false },
 };
 
 export default function PayLayout({

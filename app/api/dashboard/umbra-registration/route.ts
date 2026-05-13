@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import prisma from "@/lib/db";
-import { requirePrivyAuth } from "@/lib/privy";
+import { requirePrivyAuthForDashboard } from "@/lib/privy";
+import { dashboardApiRequireMerchant } from "@/lib/dashboard-api-auth";
 
 /**
  * POST /api/dashboard/umbra-registration
@@ -8,11 +9,10 @@ import { requirePrivyAuth } from "@/lib/privy";
  * Auth: Privy Bearer token (same as /api/dashboard/me).
  */
 export async function POST(request: Request) {
-  const { merchant, error } = await requirePrivyAuth(request);
-
-  if (!merchant) {
-    return NextResponse.json({ error: error ?? "Unauthorized" }, { status: 401 });
-  }
+  const auth = await requirePrivyAuthForDashboard(request);
+  const gate = dashboardApiRequireMerchant(auth);
+  if (gate instanceof NextResponse) return gate;
+  const { merchant } = gate;
 
   if (!merchant.walletAddress) {
     return NextResponse.json({ error: "No Solana wallet linked to this account" }, { status: 400 });

@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { PrismaClientKnownRequestError } from "@prisma/client/runtime/client";
 import prisma from "@/lib/db";
 import { isPayrollDelegationApiEnabled } from "@/lib/privy-node";
-import { requirePrivyAuth } from "@/lib/privy";
+import { requirePrivyAuthForDashboard } from "@/lib/privy";
+import { dashboardApiRequireMerchant } from "@/lib/dashboard-api-auth";
 import type { PayrollCurrency } from "@/lib/payroll/constants";
 
 type ItemIn = { destinationAddress?: unknown; amount?: unknown };
@@ -12,8 +13,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Payroll delegation is not enabled." }, { status: 404 });
   }
 
-  const { merchant, error } = await requirePrivyAuth(request as unknown as Request);
-  if (!merchant) return NextResponse.json({ error: error ?? "Unauthorized" }, { status: 401 });
+  const auth = await requirePrivyAuthForDashboard(request as unknown as Request);
+  const gate = dashboardApiRequireMerchant(auth);
+  if (gate instanceof NextResponse) return gate;
+  const { merchant } = gate;
 
   let body: { memo?: unknown; currency?: unknown; category?: unknown; items?: unknown };
   try {

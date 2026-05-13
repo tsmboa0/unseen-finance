@@ -6,6 +6,18 @@ import "./auditor.css";
 export const metadata: Metadata = {
   title: "Auditor report",
   description: "Generate a confidential PDF from a disclosed viewing key and mint.",
+  alternates: { canonical: "/auditor" },
+  openGraph: {
+    url: "/auditor",
+    title: "Auditor report · Unseen Finance",
+    description: "Generate a confidential PDF from a disclosed viewing key and mint.",
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Auditor report · Unseen Finance",
+    description: "Generate a confidential PDF from a disclosed viewing key and mint.",
+  },
 };
 
 export default function AuditorPage() {

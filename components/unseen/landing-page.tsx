@@ -25,6 +25,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { useBetaPendingRedirectRef } from "@/components/beta/beta-login-gate-provider";
 import { SiteShell } from "@/components/unseen/site-shell";
 import { UNSEEN_DOCS_URL } from "@/lib/docs-url";
 import { usePrivy } from "@privy-io/react-auth";
@@ -375,22 +376,21 @@ const codeSnippets: Record<TabId, CodeToken[][]> = {
  * ───────────────────────────────────────────────────────── */
 
 export function LandingPage() {
+  return (
+    <SiteShell className="unseen-site-root--landing">
+      <LandingPageContent />
+    </SiteShell>
+  );
+}
+
+function LandingPageContent() {
   const reducedMotion = useReducedMotion();
   const [stage, setStage] = useState(0);
   const [activeTab, setActiveTab] = useState<TabId>("gateway");
   const [activeRow, setActiveRow] = useState<number>(-1);
   const { login, ready, authenticated } = usePrivy();
   const router = useRouter();
-  const pendingRedirect = useRef(false);
-
-  // Redirect to dashboard once login completes — only when the user
-  // explicitly called login() in this session, not on every page visit.
-  useEffect(() => {
-    if (ready && authenticated && pendingRedirect.current) {
-      pendingRedirect.current = false;
-      router.replace("/dashboard");
-    }
-  }, [ready, authenticated, router]);
+  const pendingRedirect = useBetaPendingRedirectRef();
 
   useEffect(() => {
     const timers = [
@@ -478,8 +478,7 @@ export function LandingPage() {
   }, [reducedMotion]);
 
   return (
-    <SiteShell className="unseen-site-root--landing">
-      <main className="landing-page">
+    <main className="landing-page">
         <AuroraBackdrop />
 
         <section className="hero-section">
@@ -901,7 +900,6 @@ export function LandingPage() {
           </div>
         </section>
       </main>
-    </SiteShell>
   );
 }
 

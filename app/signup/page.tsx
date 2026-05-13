@@ -3,6 +3,22 @@ import { PlaceholderPage } from "@/components/unseen/placeholder-page";
 
 export const metadata: Metadata = {
   title: "Start Building",
+  description:
+    "Provision merchants, create payment sessions, and ship shielded Solana commerce flows from one platform.",
+  alternates: { canonical: "/signup" },
+  openGraph: {
+    url: "/signup",
+    title: "Start Building · Unseen Finance",
+    description:
+      "Provision merchants, create payment sessions, and ship shielded Solana commerce flows from one platform.",
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Start Building · Unseen Finance",
+    description:
+      "Provision merchants, create payment sessions, and ship shielded Solana commerce flows from one platform.",
+  },
 };
 
 export default function SignupPage() {

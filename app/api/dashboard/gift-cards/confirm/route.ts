@@ -1,14 +1,17 @@
 import { NextResponse } from "next/server";
 import prisma from "@/lib/db";
-import { requirePrivyAuth } from "@/lib/privy";
+import { requirePrivyAuthForDashboard } from "@/lib/privy";
+import { dashboardApiRequireMerchant } from "@/lib/dashboard-api-auth";
 import { generatePlainClaimCode, hashClaimCode, normalizeClaimCode } from "@/lib/gift-cards/claim-code";
 import { verifySplTransferToAta } from "@/lib/gift-cards/verify-spl-funding";
 import { giftAdminTokenAta, getGiftAdminSigner } from "@/lib/gift-cards/admin-wallet";
 import { getDefaultSolanaEndpoints } from "@/lib/solana-endpoints";
 
 export async function POST(request: Request) {
-  const { merchant, error } = await requirePrivyAuth(request);
-  if (!merchant) return NextResponse.json({ error: error ?? "Unauthorized" }, { status: 401 });
+  const auth = await requirePrivyAuthForDashboard(request);
+  const gate = dashboardApiRequireMerchant(auth);
+  if (gate instanceof NextResponse) return gate;
+  const { merchant } = gate;
 
   let body: { giftId?: string; fundingTxSignature?: string };
   try {

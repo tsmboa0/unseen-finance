@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { renderToBuffer } from "@react-pdf/renderer";
 import React from "react";
 import prisma from "@/lib/db";
-import { requirePrivyAuth } from "@/lib/privy";
+import { requirePrivyAuthForDashboard } from "@/lib/privy";
+import { dashboardApiRequireMerchant } from "@/lib/dashboard-api-auth";
 import type { Product } from "@/lib/dashboard-types";
 import {
   ComplianceReportPdfDocument,
@@ -28,10 +29,10 @@ const PRODUCT_LABELS: Record<Product, string> = {
 };
 
 export async function GET(request: NextRequest, context: { params: Promise<{ id: string }> }) {
-  const { merchant, error } = await requirePrivyAuth(request as unknown as Request);
-  if (!merchant) {
-    return NextResponse.json({ error: error ?? "Unauthorized" }, { status: 401 });
-  }
+  const auth = await requirePrivyAuthForDashboard(request as unknown as Request);
+  const gate = dashboardApiRequireMerchant(auth);
+  if (gate instanceof NextResponse) return gate;
+  const { merchant } = gate;
 
   const { id } = await context.params;
   const report = await prisma.complianceDisclosureReport.findFirst({

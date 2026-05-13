@@ -4,7 +4,7 @@
 
 This **[Next.js](https://nextjs.org)** application is the hosted **Unseen Finance** stack: merchants get **payments, storefronts, invoices, payroll, gift cards / tip-linked flows, compliance, auditing**, and the **merchant dashboard**. Confidential settlement primitives come from **[Umbra](https://www.npmjs.com/package/@umbra-privacy/sdk)** (`@umbra-privacy/sdk`, `@umbra-privacy/web-zk-prover`, `@umbra-privacy/indexer-read-service-client` — see [`package.json`](./package.json)).
 
-Merchant **REST** integrations ship as **`@unseen_fi/sdk`** — source [**github.com/tsmboa0/unseen-sdk**](https://github.com/tsmboa0/unseen-sdk) (npm: [`@unseen_fi/sdk`](https://www.npmjs.com/package/@unseen_fi/sdk)); in **this** monorepo the same package lives at [`../packages/unseen-sdk`](../packages/unseen-sdk). This README is the **in-repo map** for `unseen_app`: every major product surface, how it relates to Umbra (**direct imports** vs **indirect via `/pay/[id]` checkout**), and **exact file paths** to implementations.
+Merchant **REST** integrations ship as **`@unseen_fi/sdk`** — source [**github.com/tsmboa0/unseen-sdk**](https://github.com/tsmboa0/unseen-sdk) (npm: [`@unseen_fi/sdk`](https://www.npmjs.com/package/@unseen_fi/sdk)). This README is the **in-repo map** for `unseen_app`: every major product surface, how it relates to Umbra (**direct imports** vs **indirect via `/pay/[id]` checkout**), and **exact file paths** to implementations.
 
 ---
 
@@ -14,7 +14,7 @@ Merchant **REST** integrations ship as **`@unseen_fi/sdk`** — source [**github
 | -------- | --- |
 | Product | [unseen.finance](https://unseen.finance) |
 | Documentation | [docs.unseen.finance](https://docs.unseen.finance) |
-| Server SDK | [GitHub `tsmboa0/unseen-sdk`](https://github.com/tsmboa0/unseen-sdk) · [npm `@unseen_fi/sdk`](https://www.npmjs.com/package/@unseen_fi/sdk) · monorepo copy [`../packages/unseen-sdk`](../packages/unseen-sdk) |
+| Server SDK | [GitHub `tsmboa0/unseen-sdk`](https://github.com/tsmboa0/unseen-sdk) · [npm `@unseen_fi/sdk`](https://www.npmjs.com/package/@unseen_fi/sdk)|
 | React Pay UI | [npm `@unseen_fi/ui`](https://www.npmjs.com/package/@unseen_fi/ui) |
 
 ---

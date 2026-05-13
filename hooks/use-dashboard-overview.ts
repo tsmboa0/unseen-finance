@@ -45,12 +45,33 @@ export function useDashboardOverview() {
       const res = await fetch("/api/dashboard/overview", {
         headers: { Authorization: `Bearer ${token}` },
       });
-      if (res.status === 401 || res.status === 403) {
+
+      const overviewPayload = (await res.json().catch(() => null)) as unknown;
+
+      if (res.status === 401) {
         router.replace("/");
         return;
       }
+
+      if (res.status === 403) {
+        const code =
+          overviewPayload &&
+          typeof overviewPayload === "object" &&
+          overviewPayload !== null &&
+          "code" in overviewPayload &&
+          typeof (overviewPayload as { code?: unknown }).code === "string"
+            ? (overviewPayload as { code: string }).code
+            : null;
+        if (code === "BETA_REQUIRED") {
+          setError("Beta access required");
+          return;
+        }
+        router.replace("/");
+        return;
+      }
+
       if (!res.ok) throw new Error(`Overview HTTP ${res.status}`);
-      const json = (await res.json()) as OverviewResponse;
+      const json = overviewPayload as OverviewResponse;
       setData(json);
       hasLoadedOnce.current = true;
     } catch (e) {

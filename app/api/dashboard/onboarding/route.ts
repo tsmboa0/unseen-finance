@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import prisma from "@/lib/db";
-import { requirePrivyAuth } from "@/lib/privy";
+import { requirePrivyAuthForDashboard } from "@/lib/privy";
+import { dashboardApiUnauthorized } from "@/lib/dashboard-api-auth";
 import { generateApiKey, generateWebhookSecret } from "@/lib/utils";
 
 type OnboardingPayload = {
@@ -34,12 +35,17 @@ function prismaCode(e: unknown): string | null {
  * For users who somehow have a merchant but haven't finished onboarding: UPDATES it.
  */
 export async function POST(request: Request) {
-  const { merchant, authUser, error } = await requirePrivyAuth(request);
+  const auth = await requirePrivyAuthForDashboard(request);
 
-  // Must be authenticated — merchant may legitimately be null (new user)
+  const unauthorized = dashboardApiUnauthorized(auth);
+  if (unauthorized) return unauthorized;
+
+  const authUser = auth.authUser;
   if (!authUser) {
-    return NextResponse.json({ error: error ?? "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+
+  const { merchant } = auth;
 
   let body: OnboardingPayload;
   try {

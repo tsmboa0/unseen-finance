@@ -12,11 +12,28 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { slug } = await params;
   const store = await prisma.store.findUnique({
     where: { slug },
-    select: { name: true, description: true },
+    select: { name: true, description: true, logoUrl: true },
   });
+  const title = store?.name ?? "Store";
+  const description =
+    store?.description ?? "Shop with private payments powered by Unseen Finance";
+
   return {
-    title: store?.name ?? "Store",
-    description: store?.description ?? "Shop with private payments powered by Unseen Finance",
+    title,
+    description,
+    openGraph: {
+      title,
+      description,
+      url: `/store/${slug}`,
+      type: "website",
+      ...(store?.logoUrl ? { images: [{ url: store.logoUrl, alt: title }] } : {}),
+    },
+    twitter: {
+      card: "summary_large_image",
+      title,
+      description,
+      ...(store?.logoUrl ? { images: [store.logoUrl] } : {}),
+    },
   };
 }
 

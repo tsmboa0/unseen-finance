@@ -39,6 +39,7 @@
     "@umbra-privacy/web-zk-prover": "^2.0.1",
     "@unseen_fi/sdk": "^0.1.1",
     "@unseen_fi/ui": "^0.1.10",
+    "@vercel/analytics": "^1.6.1",
     "@wallet-standard/app": "^1.1.0",
     "@wallet-standard/base": "^1.1.0",
     "@wallet-standard/features": "^1.1.0",

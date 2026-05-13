@@ -10,7 +10,8 @@ import { resolvePrivySolanaEmbeddedWalletId } from "@/lib/payroll/resolve-privy-
 import { getPayrollAppWalletAuthorizationContext } from "@/lib/payroll/privy-app-authorization";
 import { createPayrollServerUmbraClient, depositPublicToRecipientEtaServer } from "@/lib/payroll/server-umbra-deposit";
 import { getPrivyNodeClient, isPayrollDelegationApiEnabled } from "@/lib/privy-node";
-import { requirePrivyAuth } from "@/lib/privy";
+import { requirePrivyAuthForDashboard } from "@/lib/privy";
+import { dashboardApiRequireMerchant } from "@/lib/dashboard-api-auth";
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
@@ -28,8 +29,10 @@ export async function POST(
     return NextResponse.json({ error: "Payroll delegation is not enabled." }, { status: 404 });
   }
 
-  const { merchant, error } = await requirePrivyAuth(request as unknown as Request);
-  if (!merchant) return NextResponse.json({ error: error ?? "Unauthorized" }, { status: 401 });
+  const auth = await requirePrivyAuthForDashboard(request as unknown as Request);
+  const gate = dashboardApiRequireMerchant(auth);
+  if (gate instanceof NextResponse) return gate;
+  const { merchant } = gate;
 
   if (!merchant.walletAddress || !merchant.umbraRegistered) {
     return NextResponse.json(

@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/db";
 import { PAYROLL_SIGNER_CONSENT_TTL_MS } from "@/lib/payroll/constants";
 import { isPayrollDelegationApiEnabled } from "@/lib/privy-node";
-import { requirePrivyAuth } from "@/lib/privy";
+import { requirePrivyAuthForDashboard } from "@/lib/privy";
+import { dashboardApiRequireMerchant } from "@/lib/dashboard-api-auth";
 
 /** Records successful client-side `addSigners` so we can skip the delegation explainer until expiry. */
 export async function POST(request: NextRequest) {
@@ -10,8 +11,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Payroll delegation is not enabled." }, { status: 404 });
   }
 
-  const { merchant, error } = await requirePrivyAuth(request as unknown as Request);
-  if (!merchant) return NextResponse.json({ error: error ?? "Unauthorized" }, { status: 401 });
+  const auth = await requirePrivyAuthForDashboard(request as unknown as Request);
+  const gate = dashboardApiRequireMerchant(auth);
+  if (gate instanceof NextResponse) return gate;
+  const { merchant } = gate;
 
   const now = new Date();
   const validUntil = new Date(now.getTime() + PAYROLL_SIGNER_CONSENT_TTL_MS);

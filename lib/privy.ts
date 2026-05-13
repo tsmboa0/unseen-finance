@@ -1,5 +1,6 @@
 import { PrivyClient } from "@privy-io/server-auth";
 import prisma from "@/lib/db";
+import { isBetaEmailApproved, normalizeBetaProgramEmail } from "@/lib/beta-program";
 
 // ─── Privy Server Client ──────────────────────────────────────────────────────
 
@@ -135,4 +136,49 @@ export async function requirePrivyAuth(request: Request) {
   }
 
   return { merchant, authUser, error: null };
+}
+
+// ─── requirePrivyAuthForDashboard ─────────────────────────────────────────────
+// Same as requirePrivyAuth, plus closed-beta allowlist enforcement for every
+// merchant dashboard API route.
+
+export type DashboardPrivyAuthResult = {
+  merchant: Awaited<ReturnType<typeof requirePrivyAuth>>["merchant"];
+  authUser: AuthUser | null;
+  error: string | null;
+  betaAccessDenied: boolean;
+};
+
+export async function requirePrivyAuthForDashboard(request: Request): Promise<DashboardPrivyAuthResult> {
+  const result = await requirePrivyAuth(request);
+  if (result.error || !result.authUser) {
+    return { merchant: result.merchant, authUser: result.authUser, error: result.error, betaAccessDenied: false };
+  }
+
+  const rawEmail = result.authUser.email;
+  if (!rawEmail) {
+    return {
+      merchant: result.merchant,
+      authUser: result.authUser,
+      error: "Email is required for dashboard access",
+      betaAccessDenied: true,
+    };
+  }
+
+  const approved = await isBetaEmailApproved(normalizeBetaProgramEmail(rawEmail));
+  if (!approved) {
+    return {
+      merchant: result.merchant,
+      authUser: result.authUser,
+      error: "Beta access required",
+      betaAccessDenied: true,
+    };
+  }
+
+  return {
+    merchant: result.merchant,
+    authUser: result.authUser,
+    error: null,
+    betaAccessDenied: false,
+  };
 }
