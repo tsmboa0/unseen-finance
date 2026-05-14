@@ -1,6 +1,7 @@
 import prisma from "@/lib/db";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
+import { defaultOpenGraphImages, defaultTwitterImages } from "@/lib/seo-sharing";
 import { StoreLayoutClient } from "./store-layout-client";
 
 type Props = {
@@ -26,13 +27,15 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       description,
       url: `/store/${slug}`,
       type: "website",
-      ...(store?.logoUrl ? { images: [{ url: store.logoUrl, alt: title }] } : {}),
+      images: store?.logoUrl
+        ? [{ url: store.logoUrl, alt: title }, ...defaultOpenGraphImages()]
+        : defaultOpenGraphImages(),
     },
     twitter: {
       card: "summary_large_image",
       title,
       description,
-      ...(store?.logoUrl ? { images: [store.logoUrl] } : {}),
+      images: store?.logoUrl ? [store.logoUrl, ...defaultTwitterImages()] : defaultTwitterImages(),
     },
   };
 }

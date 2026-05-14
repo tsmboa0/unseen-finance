@@ -5,7 +5,7 @@
 export function getSiteUrl(): string {
   const raw = process.env.NEXT_PUBLIC_SITE_URL?.trim();
   if (raw) return raw.replace(/\/$/, "");
-  return "https://unseen.finance";
+  return "https://www.unseen.finance";
 }
 
 export const SITE_NAME = "Unseen Finance";

@@ -594,7 +594,7 @@ function LandingPageContent() {
           </div>
         </m.section>
 
-        <section className="section-shell">
+        <section className="section-shell" id="explore-products">
           <SectionHeader
             eyebrow="WHAT WE BUILD"
             heading={

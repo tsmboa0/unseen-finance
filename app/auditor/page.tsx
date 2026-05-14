@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { defaultOpenGraphImages, defaultTwitterImages } from "@/lib/seo-sharing";
 import { SiteShell } from "@/components/unseen/site-shell";
 import { AuditorReportForm } from "./auditor-report-form";
 import "./auditor.css";
@@ -12,11 +13,13 @@ export const metadata: Metadata = {
     title: "Auditor report · Unseen Finance",
     description: "Generate a confidential PDF from a disclosed viewing key and mint.",
     type: "website",
+    images: defaultOpenGraphImages(),
   },
   twitter: {
     card: "summary_large_image",
     title: "Auditor report · Unseen Finance",
     description: "Generate a confidential PDF from a disclosed viewing key and mint.",
+    images: defaultTwitterImages(),
   },
 };
 

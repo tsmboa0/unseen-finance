@@ -3,6 +3,7 @@ import { Analytics } from "@vercel/analytics/react";
 import { SiteJsonLd } from "@/components/seo/site-json-ld";
 import { PrivyClientProvider } from "@/components/providers/privy-provider";
 import { ThemeProvider } from "@/components/theme-provider";
+import { defaultOpenGraphImages, defaultTwitterImages } from "@/lib/seo-sharing";
 import {
   DEFAULT_DESCRIPTION,
   SEO_ASSETS,
@@ -52,31 +53,17 @@ export const metadata: Metadata = {
   openGraph: {
     type: "website",
     locale: "en_US",
+    url: "/",
     siteName: SITE_NAME,
     title: SITE_NAME,
     description: SITE_TAGLINE,
-    images: [
-      {
-        url: SEO_ASSETS.ogDefault,
-        width: 1200,
-        height: 630,
-        alt: `${SITE_NAME} — ${SITE_TAGLINE}`,
-        type: "image/png",
-      },
-      {
-        url: SEO_ASSETS.logo,
-        width: 512,
-        height: 512,
-        alt: `${SITE_NAME} logo`,
-        type: "image/png",
-      },
-    ],
+    images: defaultOpenGraphImages(),
   },
   twitter: {
     card: "summary_large_image",
     title: SITE_NAME,
     description: SITE_TAGLINE,
-    images: [SEO_ASSETS.ogDefault],
+    images: defaultTwitterImages(),
   },
   icons: {
     icon: [{ url: SEO_ASSETS.icon, type: "image/png" }],

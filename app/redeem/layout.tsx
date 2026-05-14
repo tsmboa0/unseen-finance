@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { defaultOpenGraphImages, defaultTwitterImages } from "@/lib/seo-sharing";
 
 export const metadata: Metadata = {
   title: "Redeem",
@@ -11,12 +12,14 @@ export const metadata: Metadata = {
     description:
       "Redeem Unseen gift cards and shielded value on Solana with your wallet — fast, private checkout.",
     type: "website",
+    images: defaultOpenGraphImages(),
   },
   twitter: {
     card: "summary_large_image",
     title: "Redeem · Unseen Finance",
     description:
       "Redeem Unseen gift cards and shielded value on Solana with your wallet — fast, private checkout.",
+    images: defaultTwitterImages(),
   },
 };
 

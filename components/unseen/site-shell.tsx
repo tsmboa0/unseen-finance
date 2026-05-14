@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import {
   type LucideIcon,
   Activity,
-  AtSign,
   ArrowRight,
   Briefcase,
   Building2,
@@ -13,14 +12,11 @@ import {
   CircleDollarSign,
   Code2,
   Command,
-  Disc3,
   ExternalLink,
   FileCheck2,
   Gift,
   Landmark,
   Menu,
-  PanelsTopLeft,
-  Send,
   Shield,
   Store,
   X,
@@ -33,6 +29,13 @@ import {
   m,
   useReducedMotion,
 } from "framer-motion";
+import {
+  IconBrandDiscord,
+  IconBrandGithub,
+  IconBrandTelegram,
+  IconBrandX,
+} from "@/components/unseen/social-brand-icons";
+import { SOCIAL_URL_TELEGRAM, SOCIAL_URL_X } from "@/lib/social-urls";
 import {
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
@@ -91,7 +94,7 @@ const productMenu: MenuItem[] = [
   },
   {
     title: "Unseen Compliance",
-    description: "Authorized disclosure for regulators",
+    description: "Authorized disclosure for regulators & partners",
     href: "/products/compliance",
     icon: FileCheck2,
   },
@@ -107,7 +110,7 @@ const solutionMenu: MenuItem[] = [
   {
     title: "For Enterprises",
     description: "Institutional-grade privacy rails",
-    href: "/products/compliance",
+    href: "/auditor",
     icon: Building2,
   },
   {
@@ -408,9 +411,9 @@ function Navbar({ stage, variant }: { stage: number; variant: "default" | "minim
             <Link
               className="navbar-link"
               data-cursor-hover="true"
-              href="/products/compliance"
+              href="/auditor"
             >
-              Compliance
+              Auditor
             </Link>
             <Link className="navbar-link" data-cursor-hover="true" href="/pricing">
               Pricing
@@ -509,10 +512,10 @@ function Navbar({ stage, variant }: { stage: number; variant: "default" | "minim
                 </Link>
                 <Link
                   className="mobile-drawer-link"
-                  href="/products/compliance"
+                  href="/auditor"
                   onClick={closeDrawer}
                 >
-                  Compliance
+                  Auditor
                 </Link>
               </div>
               <div className="mobile-drawer-actions">
@@ -950,17 +953,20 @@ function Footer({
           <UnseenLogo compact />
           <p className="site-footer__tagline">Confidential Finance on Solana.</p>
           <div className="site-footer__socials">
-            <SocialLink ariaLabel="Follow Unseen Finance on X" href="https://x.com">
-              <AtSign size={16} />
+            <SocialLink ariaLabel="Follow Unseen Finance on X" href={SOCIAL_URL_X}>
+              <IconBrandX size={16} />
             </SocialLink>
             <SocialLink ariaLabel="View Unseen Finance on GitHub" href="https://github.com">
-              <PanelsTopLeft size={16} />
+              <IconBrandGithub size={16} />
             </SocialLink>
             <SocialLink ariaLabel="Join Unseen Finance on Discord" href="https://discord.com">
-              <Disc3 size={16} />
+              <IconBrandDiscord size={16} />
             </SocialLink>
-            <SocialLink ariaLabel="Join Unseen Finance on Telegram" href="https://telegram.org">
-              <Send size={16} />
+            <SocialLink
+              ariaLabel="Join Unseen Finance on Telegram"
+              href={SOCIAL_URL_TELEGRAM}
+            >
+              <IconBrandTelegram size={16} />
             </SocialLink>
           </div>
         </div>
